@@ -126,16 +126,11 @@ majority(F, I) ->
 stop_induce(I, []) ->
     {majority, majority(class, I)};
 stop_induce(Instances, _) ->
-    case is_pure(class, Instances) of
-	false ->
-	    Count = occurences(class, Instances),
-	    N = lists:sum([V || {_, V} <- Count]),
-	    case lists:filter(fun ({_, C}) -> C / N == 1 end, Count) of
-		[] -> dont_stop;
-		[{X,_}|_] -> {majority, X}
-	    end;
-	{true, Pure} ->
-	    {majority, Pure}
+    Count = occurences(class, Instances),
+    N = lists:sum([V || {_, V} <- Count]),
+    case lists:filter(fun ({_, C}) -> C / N == 1 end, Count) of
+	[] -> dont_stop;
+	[{X,_}|_] -> {majority, X}
     end.
 
 
