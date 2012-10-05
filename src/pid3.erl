@@ -4,7 +4,7 @@
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
 -module(pid3).
--export([induce/1, induce_branch/4]).
+-export([induce/1, induce_branch/4, run/3]).
 
 -include("nodes.hrl").
 
@@ -22,9 +22,9 @@ induce(Instances, Features) ->
     case ?INST:stop_induce(Instances, Features) of
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
-	dont_stop ->
-	    {F, _} = util:min(?INST:gain_ratio(Features, Instances)),
-	    S = ?INST:extract_branches(F, Instances),
+	{dont_stop, N} ->
+	    {F, _} = util:min(?INST:gain_ratio(Features, Instances, N)),
+	    S = ?INST:split(F, Instances),
 	    Branches = induce_branches(Features, F, S),
 	    #node{type=compare, value=#compare{type=nominal, feature=F, branches=Branches}}
     end.
@@ -67,3 +67,18 @@ collect_branches(From, Pids, Acc) ->
 	{From, Pid, Node} ->
 	    collect_branches(From, lists:delete(Pid, Pids), [Node|Acc])    
     end.
+
+run(file, File, N) ->
+    Data = ?INST:load(File),
+    run(data, Data, N);
+run(data, Data, N) ->
+    {Test, Train} =  lists:split(length(Data) div N, Data),
+    {Time, Model} = timer:tc(?MODULE, induce, [Train]),
+    Result = lists:foldl(fun (Inst, Acc) -> 
+				 [?INST:classify(Inst, Model) == gb_trees:get(class, Inst)|Acc] 
+			 end, [], Test),
+    Correct = length(lists:filter(fun (X) -> X end, Result)),
+    Incorrect = length(lists:filter(fun (X) -> X == false end, Result)),
+    {Time, Correct, Incorrect, Correct / (Incorrect + Correct), Result}.
+
+

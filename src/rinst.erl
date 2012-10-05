@@ -2,9 +2,9 @@
 -module(rinst).
 
 -include("nodes.hrl").
--export([features/1,  get/2, load/1, golfing/0, extract_branches/2, 
-	 occurences/2, is_pure/2, feature_ratio/2, feature_gain/2, 
-	 gain_ratio/2, majority/2, classify/2, stop_induce/2]).
+-export([features/1,  get/2, load/1, golfing/0, split/2, 
+	 occurences/2, is_pure/2, feature_ratio/2, feature_gain/3, 
+	 gain_ratio/3, majority/2, classify/2, stop_induce/2]).
 
 load(File) ->
     {_, Data} = file:consult(File),
@@ -32,18 +32,18 @@ get(Feature, Instances) ->
 		      gb_trees:get(Feature, Instance)
 	      end, Instances).
 
-extract_branches(F, I) ->
-    gb_trees:to_list(extract_branches(F, I, gb_trees:empty())).
+split(F, I) ->
+    gb_trees:to_list(split(F, I, gb_trees:empty())).
 
-extract_branches(_, [], Acc) ->
+split(_, [], Acc) ->
     Acc;
-extract_branches(F, [I|R], Acc) ->
+split(F, [I|R], Acc) ->
     Value = gb_trees:get(F, I),
     case gb_trees:lookup(Value, Acc) of
 	{value, List} ->
-	    extract_branches(F, R, gb_trees:enter(Value, [gb_trees:delete(F, I)|List], Acc));
+	    split(F, R, gb_trees:enter(Value, [gb_trees:delete(F, I)|List], Acc));
 	none ->
-	    extract_branches(F, R, gb_trees:enter(Value, [gb_trees:delete(F, I)], Acc))
+	    split(F, R, gb_trees:enter(Value, [gb_trees:delete(F, I)], Acc))
     end.
 
 % O(n log m)
@@ -99,17 +99,16 @@ feature_ratio(F, [I|R], Acc) ->
 feature_ratio(_, [], Acc) ->
     Acc.
 
-gain_ratio(F, I) ->
-    gain_ratio(F, I, []).
-gain_ratio([], _, Acc) ->
+gain_ratio(F, I, N) ->
+    gain_ratio(F, I, N, []).
+gain_ratio([], _, _, Acc) ->
     Acc;
-gain_ratio([F|R], I, Acc) ->
-    gain_ratio(R, I, [{F, feature_gain(F, I)}|Acc]).
+gain_ratio([F|R], I, N, Acc) ->
+    gain_ratio(R, I, N, [{F, feature_gain(F, I, N)}|Acc]).
 
 
-feature_gain(F, I) ->
+feature_gain(F, I, N) ->
     Ratios = feature_ratio(F, I),
-    N = lists:sum([lists:sum([C || {_, C} <- CDist]) || {_,CDist} <- Ratios]),
     G = stat:gain(Ratios, N),
     Gi = stat:split_info(Ratios, N),
     G / (Gi + 0.000000000001).
@@ -129,7 +128,7 @@ stop_induce(Instances, _) ->
     Count = occurences(class, Instances),
     N = lists:sum([V || {_, V} <- Count]),
     case lists:filter(fun ({_, C}) -> C / N == 1 end, Count) of
-	[] -> dont_stop;
+	[] -> {dont_stop, N};
 	[{X,_}|_] -> {majority, X}
     end.
 
@@ -146,7 +145,7 @@ classify(_, #node{type=classify, value=#classify{as=Class}}) ->
     Class;
 classify(Instance, #node{type=compare, value=#compare{type=nominal, feature=F, branches=B}}) ->
     case gb_trees:lookup(F, Instance) of
-	{value, [V|_]} ->
+	{value, V} ->
 	    Branch = find_branch(V, B),
 	    classify(Instance, Branch);
 	none ->
