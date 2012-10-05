@@ -3,7 +3,7 @@
 %% Todo:
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
--module(ac5).
+-module(pid3).
 -export([induce/1, induce_branch/4]).
 
 -include("nodes.hrl").

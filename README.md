@@ -1,8 +1,8 @@
 erlang-id3
 ==========
 
-* ac5.erl: Asynchronous ID3 inducer
-* c5.erl: Synchronous ID3 inducer
+* pid3.erl: Asynchronous (paralell) ID3 inducer
+* id3.erl: Synchronous ID3 inducer
 * rinst.erl: Handle the instance set
 
 

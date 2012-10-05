@@ -1,6 +1,6 @@
 %% Non asynchronous decision tree inducer based on ID3
 %%
--module(c5).
+-module(id3).
 -export([induce/1]).
 
 -include("nodes.hrl").
