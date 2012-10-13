@@ -4,11 +4,12 @@
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
 -module(pid3).
--export([induce/1, induce_branch/4, run/3]).
+-export([induce/1, induce_branch/5, run/3]).
 
 -include("nodes.hrl").
 
 -define(INST, rinst). % intended to be used for future changes to inst 
+-define(MAX_DEPTH, 5). % max branch depth to parallelize
 
 %% Induce decision tree from Instances
 %% Input:
@@ -17,15 +18,19 @@
 %% Output:
 %%   - Decision tree
 induce(Instances) ->
-    induce(Instances, ?INST:features(Instances)).
-induce(Instances, Features) ->
+    induce(Instances, ?INST:features(Instances), ?MAX_DEPTH).
+induce(Instances, Features, M) ->
     case ?INST:stop_induce(Instances, Features) of
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{dont_stop, N} ->
 	    {F, _} = util:min(?INST:gain_ratio(Features, Instances, N)),
 	    S = ?INST:split(F, Instances),
-	    Branches = induce_branches(Features, F, S),
+	    Features1 = Features -- [F],
+	    Branches = case M > 0 of
+			   true -> induce_branches(Features1, S, M - 1);
+			   false -> [{Value, induce(Sn, Features1, 0)} || {Value, Sn} <- S]
+		       end,
 	    #node{type=compare, value=#compare{type=nominal, feature=F, branches=Branches}}
     end.
 
@@ -35,10 +40,10 @@ induce(Instances, Features) ->
 %%    - Splits: The Instance set splitted ad Feature
 %% Output:
 %%    - A list of Two tuples {SplittedValue, Branch}
-induce_branches(Features, Feature, Splits) ->
+induce_branches(Features, Splits, M) ->
     Me = self(),
     Pids = [spawn_link(?MODULE, induce_branch, 
-		       [Me, Sn, Value, lists:delete(Feature, Features)]) || {Value, Sn} <- Splits],
+		       [Me, Sn, Value, Features, M]) || {Value, Sn} <- Splits],
    
     collect_branches(Me, Pids, []).
 
@@ -50,8 +55,8 @@ induce_branches(Features, Feature, Splits) ->
 %%    - Features: the features to split
 %% Output:
 %%    From ! {From, self(), {Value, NewBranch}}
-induce_branch(From, Instances, Value, Features) ->
-    From ! {From, self(), {Value, induce(Instances, Features)}}.
+induce_branch(From, Instances, Value, Features, M) ->
+    From ! {From, self(), {Value, induce(Instances, Features, M)}}.
 
 %% Collect branches induced by Pids
 %% Input:
@@ -72,7 +77,7 @@ run(file, File, N) ->
     Data = ?INST:load(File),
     run(data, Data, N);
 run(data, Data, N) ->
-    {Test, Train} =  lists:split(length(Data) div N, Data),
+    {Test, Train} =  lists:split(round(length(Data) * N), Data),
     {Time, Model} = timer:tc(?MODULE, induce, [Train]),
     Result = lists:foldl(fun (Inst, Acc) -> 
 				 [?INST:classify(Inst, Model) == gb_trees:get(class, Inst)|Acc] 
