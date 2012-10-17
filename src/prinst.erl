@@ -47,10 +47,15 @@ split(F, [I|R], Acc) ->
     end.
 
 split(F, I) ->
-    {A, B} = lists:split(length(I) div 2, I),
-    Pid1 = spawn_link(?MODULE, async_split, [self(), F, A]),
-    Pid2 = spawn_link(?MODULE, async_split, [self(), F, B]),
-    collect_splits(self(), [Pid1, Pid2], []).
+    N  = length(I) div 2,
+    {A, B} = lists:split(N, I),
+    {Aa, Ba} = lists:split(N div 2, A),
+    {Ab, Bb} = lists:split(N div 2, B),
+    Pid1 = spawn_link(?MODULE, async_split, [self(), F, Aa]),
+    Pid2 = spawn_link(?MODULE, async_split, [self(), F, Ba]),
+    Pid3 = spawn_link(?MODULE, async_split, [self(), F, Ab]),
+    Pid4 = spawn_link(?MODULE, async_split, [self(), F, Bb]),
+    collect_splits(self(), [Pid1, Pid2, Pid3, Pid4], []).
 
 async_split(From, F, I) ->
     From ! {From, self(), psplit(F, I)}.   

@@ -1,6 +1,8 @@
 -module(stat).
 -compile(export_all).
 
+log2(V) ->
+    math:log(V)/math:log(2).
 
 split_info(Ratios, N) ->
     -1 * lists:sum([(Si/N) * (math:log(Si/N)/math:log(2)) 

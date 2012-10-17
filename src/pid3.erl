@@ -8,8 +8,9 @@
 
 -include("nodes.hrl").
 
--define(INST, rinst). % intended to be used for future changes to inst 
--define(MAX_DEPTH, 5). % max branch depth to parallelize
+-define(INST, ets_inst). % intended to be used for future changes to inst 
+-define(MAX_DEPTH, 0). % max branch depth to parallelize
+-define(GAIN, async).
 
 %% Induce decision tree from Instances
 %% Input:
@@ -24,13 +25,15 @@ induce(Instances, Features, M) ->
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{dont_stop, N} ->
-	    {F, _} = util:min(?INST:gain_ratio(Features, Instances, N)),
+	    {F, _} = util:min(?INST:gain(?GAIN, Features, Instances, N)),
 	    S = ?INST:split(F, Instances),
+	   
 	    Features1 = Features -- [F],
 	    Branches = case M > 0 of
 			   true -> induce_branches(Features1, S, M - 1);
 			   false -> [{Value, induce(Sn, Features1, 0)} || {Value, Sn} <- S]
 		       end,
+
 	    #node{type=compare, value=#compare{type=nominal, feature=F, branches=Branches}}
     end.
 

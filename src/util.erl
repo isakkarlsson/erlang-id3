@@ -46,3 +46,13 @@ gb_fold_1(F, Acc0, {Key, Value, Small, Big}) ->
     gb_fold_1(F, Acc, Big);
 gb_fold_1(_, Acc, _) ->
     Acc.
+
+split(List,Splits, Len) ->
+  split(lists:reverse(List),[],0,Len div Splits).
+split([],Acc,_,_) -> Acc;
+split([H|T],Acc,Pos,Max) when Pos==Max ->
+    split(T,[[H] | Acc],1,Max);
+split([H|T],[HAcc | TAcc],Pos,Max) ->
+    split(T,[[H | HAcc] | TAcc],Pos+1,Max);
+split([H|T],[],Pos,Max) ->
+    split(T,[[H]],Pos+1,Max).

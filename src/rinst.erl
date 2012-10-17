@@ -4,7 +4,7 @@
 -include("nodes.hrl").
 -export([features/1,  get/2, load/1, golfing/0, split/2, 
 	 occurences/2, is_pure/2, feature_ratio/2, feature_gain/3, 
-	 gain_ratio/3, majority/2, classify/2, stop_induce/2]).
+	 gain_ratio/3, majority/2, classify/2, stop_induce/2, async_gain/3, async_feature_gain/4, gain/4]).
 
 load(File) ->
     {_, Data} = file:consult(File),
@@ -99,6 +99,44 @@ feature_ratio(F, [I|R], Acc) ->
 feature_ratio(_, [], Acc) ->
     Acc.
 
+async_gain(F, I, N) ->
+    LenF = length(F),
+    Sc = 10,
+    case true == true of
+	true ->
+	    Fs = util:split(F, Sc, LenF),
+	    Me = self(),
+	    Set = ets:new(no_name, [set, {read_concurrency, true}]),
+	    ets:insert(Set, {data, I}),
+
+	    io:format("Start~n"),
+	    Pids = [spawn_link(?MODULE, async_feature_gain, [Me, Fi, Set, N]) || Fi <- Fs],
+	    io:format("Stop~n"),
+	    collect_gain(Me, Pids, []);
+	false ->
+	    gain_ratio(F, I, N)
+    end.
+
+collect_gain(_, [], Acc) ->
+    Acc;
+collect_gain(Me, Pids, Acc) ->
+    receive
+	{Me, Pid, L} ->
+	    collect_gain(Me, lists:delete(Pid, Pids), L ++ Acc)
+    end.
+		    
+async_feature_gain(Me, F, Set, N) ->
+    [{data, I}|_] = ets:lookup(Set, data),
+    Me ! {Me, self(), gain_ratio(F, I, N)}.
+
+    
+
+gain(async, F, I, N) ->
+    async_gain(F, I, N);
+gain(sync, F, I, N) ->
+    gain_ratio(F, I, N).
+
+
 gain_ratio(F, I, N) ->
     gain_ratio(F, I, N, []).
 gain_ratio([], _, _, Acc) ->
@@ -133,7 +171,6 @@ stop_induce(Instances, _) ->
     end.
 
 
-%% TODO: Support rinst instances
 %%
 %% Classify Instance according to Model
 %% Input:
