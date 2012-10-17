@@ -4,7 +4,7 @@
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
 -module(pid3).
--export([induce/1, induce_branch/5, run/3]).
+-export([induce/1, induce_branch/5, run/3, test/2]).
 
 -include("nodes.hrl").
 
@@ -27,7 +27,6 @@ induce(Instances, Features, M) ->
 	{dont_stop, N} ->
 	    {F, _} = util:min(?INST:gain(?GAIN, Features, Instances, N)),
 	    S = ?INST:split(F, Instances),
-	   
 	    Features1 = Features -- [F],
 	    Branches = case M > 0 of
 			   true -> induce_branches(Features1, S, M - 1);
@@ -89,4 +88,6 @@ run(data, Data, N) ->
     Incorrect = length(lists:filter(fun (X) -> X == false end, Result)),
     {Time, Correct, Incorrect, Correct / (Incorrect + Correct), Result}.
 
-
+test(data, Data) ->
+    {Time, _} = timer:tc(?MODULE, induce, [Data]),
+    Time.
