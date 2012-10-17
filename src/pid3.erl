@@ -9,7 +9,7 @@
 -include("nodes.hrl").
 
 -define(INST, ets_inst). % intended to be used for future changes to inst 
--define(MAX_DEPTH, 0). % max branch depth to parallelize
+-define(MAX_DEPTH, 5). % max branch depth to parallelize
 -define(GAIN, async).
 
 %% Induce decision tree from Instances

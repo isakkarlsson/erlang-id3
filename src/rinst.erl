@@ -101,17 +101,12 @@ feature_ratio(_, [], Acc) ->
 
 async_gain(F, I, N) ->
     LenF = length(F),
-    Sc = 10,
+    Sc = 20,
     case true == true of
 	true ->
-	    Fs = util:split(F, Sc, LenF),
+	    Fs = util:split(F, case Sc > LenF of true -> LenF; false -> Sc end, LenF),
 	    Me = self(),
-	    Set = ets:new(no_name, [set, {read_concurrency, true}]),
-	    ets:insert(Set, {data, I}),
-
-	    io:format("Start~n"),
-	    Pids = [spawn_link(?MODULE, async_feature_gain, [Me, Fi, Set, N]) || Fi <- Fs],
-	    io:format("Stop~n"),
+	    Pids = [spawn_link(?MODULE, async_feature_gain, [Me, Fi, I, N]) || Fi <- Fs],
 	    collect_gain(Me, Pids, []);
 	false ->
 	    gain_ratio(F, I, N)
@@ -125,8 +120,7 @@ collect_gain(Me, Pids, Acc) ->
 	    collect_gain(Me, lists:delete(Pid, Pids), L ++ Acc)
     end.
 		    
-async_feature_gain(Me, F, Set, N) ->
-    [{data, I}|_] = ets:lookup(Set, data),
+async_feature_gain(Me, F, I, N) ->
     Me ! {Me, self(), gain_ratio(F, I, N)}.
 
     
