@@ -25,12 +25,13 @@ induce(Instances, Features, M) ->
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{dont_stop, N} ->
-	    {F, _} = util:min(?INST:gain(?GAIN, Features, Instances, N)),
+	    Paralell = if M > 0 -> ?GAIN; true -> sync end,
+	    {F, _} = util:min(?INST:gain(Paralell, Features, Instances, N)),
 	    S = ?INST:split(F, Instances),
 	    Features1 = Features -- [F],
-	    Branches = case M > 0 of
-			   true -> induce_branches(Features1, S, M - 1);
-			   false -> [{Value, induce(Sn, Features1, 0)} || {Value, Sn} <- S]
+	    Branches = case Paralell of
+			   async -> induce_branches(Features1, S, M - 1);
+			   sync -> [{Value, induce(Sn, Features1, 0)} || {Value, Sn} <- S]
 		       end,
 
 	    #node{type=compare, value=#compare{type=nominal, feature=F, branches=Branches}}

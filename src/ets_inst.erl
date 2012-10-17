@@ -89,15 +89,12 @@ feature_ratio(F, Set, Id, Acc) ->
 async_gain(F, Set, N) ->
     LenF = length(F),
     Sc = erlang:system_info(schedulers),
-    case true == true of
-	true ->
-	    Fs = util:split(F, case Sc > LenF of true -> LenF; false -> Sc end, LenF),
-	    Me = self(),
-	    Pids = [spawn_link(?MODULE, async_feature_gain, [Me, Fi, Set, N]) || Fi <- Fs],
-	    collect_gain(Me, Pids, []);
-	false ->
-	    gain_ratio(F, Set, N)
-    end.
+    Fs = util:split(F, case Sc > LenF of 
+			   true -> LenF; 
+			   false -> Sc end, LenF),
+    Me = self(),
+    Pids = [spawn_link(?MODULE, async_feature_gain, [Me, Fi, Set, N]) || Fi <- Fs],
+    collect_gain(Me, Pids, []).
 
 collect_gain(_, [], Acc) ->
     Acc;
