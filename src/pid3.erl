@@ -4,7 +4,7 @@
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
 -module(pid3).
--export([induce/2, induce_branch/5, run/3, test/2]).
+-export([induce/2, induce_branch/5, run/3, test/2, test/3, load/2]).
 
 -include("nodes.hrl").
 
@@ -26,7 +26,7 @@ induce(Attributes, Examples, M) ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{dont_stop, N} ->
 	    Paralell = if M > 0 -> ?GAIN; true -> sync end,
-	    {F, _} = util:min(?INST:gain(async, Attributes, Examples, N)),
+	    {F, _} = util:min(?INST:gain(Paralell, Attributes, Examples, N)),
 	    S = ?INST:split(F, Examples),
 	    Branches = case Paralell of
 			   async -> induce_branches(Attributes -- [F], S, M - 1);
@@ -90,10 +90,17 @@ run(data, Data, N) ->
     Incorrect = length(lists:filter(fun (X) -> X == false end, Result)),
     {Time, Correct, Incorrect, Correct / (Incorrect + Correct), Result}.
 
-test(data, File) ->
+test(data, Attributes, Examples) ->
+    {Time, Tree} = timer:tc(?MODULE, induce, [Attributes, Examples]),
+    {Time, Tree}.
+
+load(file, File) ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    {Attributes, Examples} = ?INST:load(File),
+    ?INST:load(File).
+
+test(file, File) ->
+    {Attributes, Examples} = load(file, File),
     {Time, Tree} = timer:tc(?MODULE, induce, [Attributes, Examples]),
     ets:delete(examples),
     ets:delete(attributes),
