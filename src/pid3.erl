@@ -4,11 +4,11 @@
 %%    - allow for numerical attributes (base on c4.5)
 %%    - etc.
 -module(pid3).
--export([induce/1, induce_branch/5, run/3, test/2]).
+-export([induce/2, induce_branch/5, run/3, test/2]).
 
 -include("nodes.hrl").
 
--define(INST, ets_inst). % intended to be used for future changes to inst 
+-define(INST, inst). % intended to be used for future changes to inst 
 -define(MAX_DEPTH, 5). % max branch depth to parallelize
 -define(GAIN, async).
 
@@ -18,23 +18,24 @@
 %%   - Instances: Dictionary with instances
 %% Output:
 %%   - Decision tree
-induce(Instances) ->
-    induce(Instances, ?INST:features(Instances), ?MAX_DEPTH).
-induce(Instances, Features, M) ->
-    case ?INST:stop_induce(Instances, Features) of
+induce(Attributes, Examples) ->
+    induce(Attributes, Examples, ?MAX_DEPTH).
+induce(Attributes, Examples, M) ->
+    case ?INST:stop_induce(Attributes, Examples) of
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{dont_stop, N} ->
 	    Paralell = if M > 0 -> ?GAIN; true -> sync end,
-	    {F, _} = util:min(?INST:gain(Paralell, Features, Instances, N)),
-	    S = ?INST:split(F, Instances),
-	    Features1 = Features -- [F],
+	    {F, _} = util:min(?INST:gain(async, Attributes, Examples, N)),
+	    S = ?INST:split(F, Examples),
 	    Branches = case Paralell of
-			   async -> induce_branches(Features1, S, M - 1);
-			   sync -> [{Value, induce(Sn, Features1, 0)} || {Value, Sn} <- S]
+			   async -> induce_branches(Attributes -- [F], S, M - 1);
+			   sync -> [{Value, induce(Attributes -- [F], Sn, 0)} || {Value, Sn} <- S]
 		       end,
-
-	    #node{type=compare, value=#compare{type=nominal, feature=F, branches=Branches}}
+	    %io:format("Attr: ~p ~n", [Attributes]),
+	    #node{type=compare, value=#compare{type=nominal, 
+					       feature=F, 
+					       branches=Branches}}
     end.
 
 %% Induce brances for Split
@@ -58,8 +59,8 @@ induce_branches(Features, Splits, M) ->
 %%    - Features: the features to split
 %% Output:
 %%    From ! {From, self(), {Value, NewBranch}}
-induce_branch(From, Instances, Value, Features, M) ->
-    From ! {From, self(), {Value, induce(Instances, Features, M)}}.
+induce_branch(From, Examples, Value, Attributes, M) ->
+    From ! {From, self(), {Value, induce(Attributes, Examples, M)}}.
 
 %% Collect branches induced by Pids
 %% Input:
@@ -89,6 +90,11 @@ run(data, Data, N) ->
     Incorrect = length(lists:filter(fun (X) -> X == false end, Result)),
     {Time, Correct, Incorrect, Correct / (Incorrect + Correct), Result}.
 
-test(data, Data) ->
-    {Time, _} = timer:tc(?MODULE, induce, [Data]),
-    Time.
+test(data, File) ->
+    ets:new(examples, [named_table, set, {read_concurrency, true}]),
+    ets:new(attributes, [named_table, set, {read_concurrency, true}]),
+    {Attributes, Examples} = ?INST:load(File),
+    {Time, Tree} = timer:tc(?MODULE, induce, [Attributes, Examples]),
+    ets:delete(examples),
+    ets:delete(attributes),
+    {Time, Tree}.

@@ -1,242 +1,204 @@
-% Representing data as a gb_trees with feature vectors
-%
-
 -module(inst).
 -compile(export_all).
-%% Return the features from Instances
-%% Input:
-%%   - Instances: Instance set
-%% Output:
-%%   - List of features
-features(Instances) ->
-    gb_trees:keys(gb_trees:delete(class, Instances)).
-
-get(Feature, Instances) ->
-    gb_trees:get(Feature, Instances).
-
-%% Extract new instance sets where feature has a value in Values
-%% Input:
-%%   - Instances: The instance set
-%%   - Feature: The feature to split
-%%   - Values: A list of possible values
-%% Output:
-%%   - A list of tuples {Value, NewInstanceSet}
-branches(Instances, Feature, Values) ->
-    lists:map(fun (Value) ->
-		      {Value, extract_features(Instances, Feature, Value)}
-	      end, Values).
 
 
-%% Find the possible split points
-%% Input:
-%%   - I: The instance set
-%%   - F: The feature to split
-%% Output:
-%%   - the possible values to split on
-possible_splits(I, F) ->
-    lists:map(fun ({Value, _}) ->
-		      Value
-	      end, stat:occurences(dict:fetch(F, I))).
+%
+% Examples: {Class, NoClasses, [InstId|InstIds]}
+% Types:    [{type, idx}|...]
+%
+%
+%
+%
+load(File) ->
+    {ok, Data} = file:consult(File),
+    Types0 = lists:map(fun({K, _}) ->
+			      K
+		      end, lists:keydelete('class', 1, hd(Data))),
+    Types = load_attributes(Types0, 1),
+   {Types, load_examples(Data, 0, gb_trees:empty())}.
 
-extract_branches(I, F) ->
-    FF = gb_trees:get(F, I),
-    gb_trees:to_list(extract_branches(gb_trees:delete(F, I), FF, gb_trees:empty())).
-
-extract_branches(I, [F|Fr], Dict) ->
-    NewI = util:gb_fold(fun (Key, Val, DDict) ->
-			     gb_trees:insert(Key, tl(Val), DDict)
-		     end, gb_trees:empty(), I),
-    case gb_trees:lookup(F, Dict) of
-	{value, DDict} ->
-	    extract_branches(NewI, Fr, gb_trees:enter(F, 
-						  util:gb_fold(fun (K, V, D) ->
-								    gb_trees:enter(K, [hd(V) | case gb_trees:lookup(K, D) of
-												 {value, Found} ->
-												     Found;
-												 none -> []
-											     end], D)
-							    end, DDict, I), Dict));
-	none -> extract_branches(NewI, Fr, gb_trees:enter(F, 
-						  util:gb_fold(fun (K, V, D) ->
-								    gb_trees:enter(K, [hd(V) | case gb_trees:lookup(K, D) of
-												 {value, Found} ->
-												     Found;
-												 none -> []
-											     end], D)
-							    end, gb_trees:empty(), I), Dict))
-    end;
-extract_branches(_, [], Acc) ->
-    gb_trees:map(fun (_, D) ->
-		     gb_trees:map(fun (_, L) ->
-					  lists:reverse(L)
-				  end, D)
-		 end, Acc).
-
-						   
-
-
-%% Input:
-%%   - I: The instance set
-%%   - F: The feature
-%%   - V: The value
-%% Output:
-%%   - A new instance set with only those instances that has value v for feature vector F - F
-extract_features(I, F, V) ->
-    FF = dict:fetch(F, I),
-    extract_features(dict:erase(F, I), FF, V, dict:new()).
-extract_features(I, [F|Fr], V, Acc) ->
-    NewI = dict:fold(fun (Key, Val, Dict) ->
-			     dict:store(Key, tl(Val), Dict)
-		     end, dict:new(), I),
-    case F == V of
-	true ->
-	    extract_features(NewI, Fr, V, 
-			     dict:fold(fun (Key, Val, Dict) ->
-					       dict:store(Key, [hd(Val)|
-								case dict:find(Key, Dict) of
-								    {ok, Found} ->
-									Found;
-								    error -> []
-								end], Dict)
-				       end, Acc, I));
-	false ->
-	    extract_features(NewI, Fr, V, Acc)
-    end;
-extract_features(_, [], _, Acc) -> 
-    dict:map(fun (_, V) -> lists:reverse(V) end, Acc).
-
-
-%% Return an instance set for the golfing case
-golfing() ->
-    Classes = [dont_play, dont_play, play, play, play, 
-	       dont_play, play, dont_play, play, play, 
-	       play, play, play, dont_play],
-    F0 = [sunny, sunny, overcast, rain, rain, 
-	  rain, overcast, sunny, sunny, rain, 
-	  sunny, overcast, overcast, rain],
-    F1 = [false, true, false, false, false, true, 
-	  true, false, false, false, true, true, 
-	  false, true],
-    Dict0 = gb_trees:empty(),
-    gb_trees:enter(windy, F1, gb_trees:enter(outlook, F0, gb_trees:enter(class, Classes, Dict0))).
-
-%% Return an instance set for the stock case
-stock() ->
-    Classes = [down, down, down, down, down, up, up, up, up, up],
-    F0 = [old, old, old, mid, mid, mid, mid, new, new, new],
-    F1 = [yes, no, no, yes, yes, no, no, yes, no, no],
-    F2 = [swr, swr, hwr, swr, hwr, hwr, swr, swr, hwr, swr],
-    gb_trees:enter(age, lists:flatten([F0 || _ <- lists:seq(1, 1)]),
-	      gb_trees:enter(competition, lists:flatten([F1 || _ <- lists:seq(1, 1)]), 
-			 gb_trees:enter(type, lists:flatten([F2 || _ <- lists:seq(1, 1)]),
-				    gb_trees:enter(class, lists:flatten([Classes || _ <- lists:seq(1, 1)]), dict:new())))).
-
-
-%% Determine the most frequent occurence in A
-%% Input:
-%%   - A: List of term()
-%% Output:
-%%   - the most frequent term()
-majority(A) ->
-    {Ret, _} = util:max(occurences(A)),
-    Ret.
-
-
-%% Return the number of occurences in Attr vector
-%% Input:
-%%   - Vector with attributes
-%% Output:
-%%   - A list of tuples {Attr, Count}
-occurences(Attr) ->
-    occurences(Attr, gb_trees:empty()).
-occurences([], Acc) ->
-    gb_trees:to_list(Acc);
-occurences([F|Ff], Acc) ->
-    case gb_trees:lookup(F, Acc) of
-	{value, V} ->
-	    occurences(Ff, gb_trees:enter(F, V + 1, Acc));
-	none ->
-	    occurences(Ff, gb_trees:enter(F, 1, Acc))
+load_attributes(Types, N) ->
+    case Types of
+	[] ->
+	    [];
+	[H|R] ->
+	    ets:insert(attributes, {N, H}),
+	    [N | load_attributes(R, N + 1)]
     end.
-is_pure(Attr) ->
-    is_pure(hd(Attr), tl(Attr)).
 
-is_pure(X, []) ->
-    {true, X};
-is_pure(H, [F|R]) when H == F->
-    is_pure(F, R);
-is_pure(_, [_|_]) ->
-    false.
+load_examples([], _, Examples) ->
+    lists:map(fun ({C, {N, L}}) -> 
+		      {C, N, L} 
+	      end, gb_trees:to_list(Examples));
+load_examples([Inst|Rest], N, Examples) ->
+    {value, {_, Class}, Tmp} = lists:keytake('class', 1, Inst),
+    ets:insert(examples, {N, list_to_tuple(lists:map(fun({_, V}) -> V end, Tmp))}),
+    load_examples(Rest, N + 1, case gb_trees:lookup(Class, Examples) of
+			  {value, {Num, Ids}} ->
+			      gb_trees:enter(Class, {Num + 1, [N|Ids]}, Examples);
+			  none ->
+			      gb_trees:enter(Class, {1, [N]}, Examples)
+		      end).
 
+lookup(Set, Id) ->
+    [{Id, Out}|_] = ets:lookup(Set, Id),
+    Out.
 
+occurences(class, Examples) ->
+    lists:map(fun ({C, N, _}) ->
+		      {C, N}
+	      end, Examples).
 
-%% Determine the class ratio of feature vector F with regard to
-%% class vector C
-%% Input:
-%%   - F: A feature vector
-%% Output:
-%%   - C: A Class vector
-feature_ratio(F, C) ->
-    gb_trees:to_list(gb_trees:map(fun (_, V) ->
-				  gb_trees:to_list(V)
-			  end, feature_ratio(F, C, gb_trees:empty()))).
-feature_ratio([F|FRest], [C|CRest], Acc) ->
-    case gb_trees:lookup(C, Acc) of
-	{value, FDict} ->
-	    case gb_trees:lookup(F, FDict) of
-		{value, V} ->
-		    feature_ratio(FRest, CRest, gb_trees:enter(C, gb_trees:enter(F, V + 1, FDict), Acc));
-		none ->
-		    feature_ratio(FRest, CRest, gb_trees:enter(C, gb_trees:enter(F, 1, FDict), Acc))
-	    end;
-	none ->
-	    feature_ratio(FRest, CRest, gb_trees:enter(C, gb_trees:enter(F, 1, gb_trees:empty()), Acc))
-    end;
-feature_ratio([], [], Acc) ->
-    Acc.
+majority(Examples) ->
+    {C, _, _} = lists:foldl(fun ({C, N, _}, {C1, N1, _}) ->
+				    case erlang:max(N, N1) of
+					N ->
+					    {C, N, []};
+					N1 ->
+					    {C1, N1, []}
+				    end
+			    end, hd(Examples), tl(Examples)),
+    C.
+			
 
-%% Calculate the gain for all feature vectors in F
-%% Input:
-%%   - I: Instance dictionary
-%%   - F: List of feature vectors
-%% Output:
-%%   - A list of tuples with {feature, Gain}
-gain_ratio(I, F) ->
-    gain_ratio(I, F, []).
-gain_ratio(_, [], Acc) ->
+split(AttrId, Examples) ->
+    split(AttrId, Examples, gb_trees:empty()).
+
+split(_, [], Acc) ->
+    gb_trees:to_list(Acc);
+split(AttrId, [{Class, _, ExampleIds}|Examples], Acc) ->
+    split(AttrId, Examples, split_class(AttrId, Class, ExampleIds, Acc)).
+
+split_class(_, _, [], Acc) ->
     Acc;
-gain_ratio(I, [F|R], Acc) ->
-    gain_ratio(I, R, case gb_trees:lookup(F, I) of
-		   {value, Features} ->
-		       Class = gb_trees:get(class, I),
-		       [{F, feature_gain(Features, Class)}|Acc];
-		   none ->
-		       exit(using_non_existent_feature)
-	       end).
-%% Calculate the gain for a feature vector
+split_class(AttrId, Class, [Ex|Examples], Acc) ->
+    Value = element(AttrId, lookup(examples, Ex)),
+    split_class(AttrId, Class, Examples, 
+		case gb_trees:lookup(Value, Acc) of
+		    {value, Classes} ->
+			case lists:keytake(Class, 1, Classes) of
+			    {value, {Class, Num, ExList}, ClassRest} ->
+				gb_trees:enter(Value, [{Class, Num + 1, [Ex|ExList]}|ClassRest], Acc);
+			    false ->
+				gb_trees:enter(Value, [{Class, 1, [Ex]}|Classes], Acc)
+			end;
+		    none ->
+			gb_trees:enter(Value, [{Class, 1, [Ex]}], Acc)
+		end).
+	    
+feature_ratio(AttrId, Examples) ->
+    feature_ratio(AttrId, Examples, gb_trees:empty()).
+
+feature_ratio(_, [], Acc) ->
+    gb_trees:to_list(Acc);
+feature_ratio(AttrId, [{Class, _, ExIds}|Examples], Acc) ->
+    feature_ratio(AttrId, Examples, feature_ratio_class(AttrId, Class, ExIds, Acc)).
+
+feature_ratio_class(_, _, [], Acc) ->
+    Acc;
+feature_ratio_class(AttrId, Class, [ExId|Rest], Acc) ->
+    Value = element(AttrId, lookup(examples, ExId)),
+    feature_ratio_class(AttrId, Class, Rest,
+			case gb_trees:lookup(Value, Acc) of
+			    {value, Classes} ->
+				case lists:keytake(Class, 1, Classes) of
+				    {value, {Class, Count}, List} ->
+					gb_trees:enter(Value, [{Class, Count + 1}|List], Acc);
+				    false ->
+					gb_trees:enter(Value, [{Class, 1}|Classes], Acc)
+				end;
+			    none ->
+				gb_trees:enter(Value, [{Class, 1}], Acc)
+			end).
+
+async_gain(AttrId, Examples, N) ->
+    AttrLen = length(AttrId),
+    Cores = erlang:system_info(schedulers),
+    AttrSplits = util:split(AttrId, if Cores > AttrLen ->
+					    AttrLen;
+				       true ->
+					    Cores
+				    end, AttrLen),
+    Me = self(),
+    [spawn(?MODULE, async_feature_gain, [Me, AttrSplit, Examples, N]) ||
+	AttrSplit <- AttrSplits],
+    collect_gain(Me, length(AttrSplits), []).
+
+
+async_feature_gain(Me, AttrIds, Examples, N) ->
+    Me ! {Me, self(), gain_ratio(AttrIds, Examples, N)}.
+
+collect_gain(_, 0, Acc) ->
+    Acc;
+collect_gain(Me, N, Acc) ->
+    receive
+	{Me, _, L} ->
+	    collect_gain(Me, N - 1, L ++ Acc)
+    end.
+
+gain(async, AttrId, Examples, Count) ->
+    async_gain(AttrId, Examples, Count);
+gain(sync, AttrId, Examples, Count) ->
+    gain_ratio(AttrId, Examples, Count).
+
+
+gain_ratio(AttrIds, Examples, Count) ->
+    gain_ratio(AttrIds, Examples, Count, []).
+
+gain_ratio([], _, _, Acc) ->
+    Acc;
+gain_ratio([AttrId|AttrIds], Examples, Count, Acc) ->
+    gain_ratio(AttrIds, Examples, Count,
+	       [{AttrId, feature_gain(AttrId, Examples, Count)}|Acc]).
+
+feature_gain(AttrId, Examples, Count) ->
+    Ratios = feature_ratio(AttrId, Examples),
+    G = stat:gain(Ratios, Count),
+    Gi = stat:split_info(Ratios, Count),
+    G / (Gi + 0.000000000001).
+
+%% Determine wheter we should stop the induction of the tree
 %% Input:
-%%  - F: Feature vector
-%%  - C: Class vector
-%% Output:
-%%  - The gain for feature vector F with regard to class vector C
-feature_gain(FV, CV) when length(FV) == length(CV) ->
-    Ratios = feature_ratio(CV, FV),
-    N = length(FV),
-    io:format("Ratios: ~p, N=~p ~n", [Ratios, N]),
-    G = stat:gain(Ratios, N),
-    GI = stat:split_info(Ratios, N),
-    G / (GI+0.00000000000001).
+%%   - I: The instance set
+%% Output
+%%   - {majority, MajorityClass} or dont_stop
+stop_induce([], Examples) ->
+    {majority, majority(Examples)};
+stop_induce(_, Examples) ->
+    Count = [V || {_, V, _} <- Examples],
+    N = lists:sum(Count),
+    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc,_} <- Examples]) of
+	[] -> {dont_stop, N};
+	[{X,_}|_] -> {majority, X}
+    end.
+
+
+test() ->
+    ets:new(examples, [named_table, set, {read_concurrency, true}]),
+    ets:new(attributes, [named_table, set, {read_concurrency, true}]),
+    {Types, Examples} = load("../data/connect-4_erl.data"),
+    {Time, _} = timer:tc(?MODULE, split, [2, Examples]),
+    io:format("Types: ~p~n", [Types]),
+    io:format("Split: ~p~n", [Time]),
+
+    {Time0, Ratio} = timer:tc(?MODULE, feature_ratio, [2, Examples]),
+    io:format("Ratio: ~p ~p~n", [Time0, Ratio]),
+
+    {Time1, Gains} = timer:tc(?MODULE, gain, 
+			      [sync, Types, Examples,
+			       lists:sum([C || {_, C, _} <- Examples])]),
+    io:format("Gains: ~p ~p ~n", [Time1, Gains]),
+
+
+    {Time2, Gains0} = timer:tc(?MODULE, gain, 
+			      [async, Types, Examples,
+			       lists:sum([C || {_, C, _} <- Examples])]),
+    io:format("AGain: ~p ~p ~n", [Time2, Gains0]),
+
     
 
-%%
-%%
-%%
-%%
-load(File) ->
-    {_, Data} = file:consult(File),
-    load(Data, gb_trees:empty()).
-load([], Dict) ->
-    Dict;
-load([{K,V}|R], Dict) ->
-    load(R, gb_trees:enter(K, V, Dict)).
 
+
+    ets:delete(attributes),
+    ets:delete(examples).
+    
