@@ -1,6 +1,40 @@
 -module(inst).
 -compile(export_all).
 
+load_cvs(File) ->
+    Data = cvs:parse(file, File),
+    [Types0|Data0] = Data,
+    [Attr0|Examples0] = Data0,
+    
+    % [{nominal, pos}, numeric, class]
+    {ClassIdx, Types} = case lists:keytake(class, 1, load_types(Types0, 1)) of
+			    {value, {_, Idx}, Types} ->
+				{Class, Types};
+			    false ->
+				throw({error, no_class})
+			end,
+    Examples = load_examples_cvs(Examples0, 0, ClassIdx, gb_trees:empty()),
+    
+    % [{nominal, pos}, ....]
+    % but inserts attributes to ets:dict with key pos
+    Attributes = load_attributes_cvs(Attr0, Types, Examples),
+    {Attributes, Examples}.
+
+
+load_types(Types, N) ->
+    load_types(Types, N, Acc).
+
+load_types([], _, Acc) ->
+    lists:reverse(Acc);
+load_types([Type|Types], N, Acc) when Type == class or 
+				      Type == nominal or
+				      Type == numeric ->
+    load_types(Types, N + 1, [{Type, N}|Acc]);
+load_types(_, _, _) ->
+    throw({error, invalid_type}).
+
+
+
 
 %
 % Examples: {Class, NoClasses, [InstId|InstIds]}
@@ -11,11 +45,11 @@
 %
 load(File) ->
     {ok, Data} = file:consult(File),
-    Types0 = lists:map(fun({K, _}) ->
+    Attrs0 = lists:map(fun({K, _}) ->
 			      K
 		      end, lists:keydelete('class', 1, hd(Data))),
-    Types = load_attributes(Types0, 1),
-   {Types, load_examples(Data, 0, gb_trees:empty())}.
+    Attrs = load_attributes(Attrs0, 1),
+   {Attrs, load_examples(Data, 0, gb_trees:empty())}.
 
 load_attributes(Types, N) ->
     case Types of

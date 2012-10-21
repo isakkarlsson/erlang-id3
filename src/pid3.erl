@@ -9,7 +9,7 @@
 -include("nodes.hrl").
 
 -define(INST, inst). % intended to be used for future changes to inst 
--define(MAX_DEPTH, 5). % max branch depth to parallelize
+-define(MAX_DEPTH, 3). % max branch depth to parallelize
 -define(GAIN, async).
 
 %% Induce decision tree from Instances
@@ -27,12 +27,11 @@ induce(Attributes, Examples, M) ->
 	{dont_stop, N} ->
 	    Paralell = if M > 0 -> ?GAIN; true -> sync end,
 	    {F, _} = util:min(?INST:gain(Paralell, Attributes, Examples, N)),
-	    S = ?INST:split(F, Examples),
+	    Splitted = ?INST:split(F, Examples),
 	    Branches = case Paralell of
-			   async -> induce_branches(Attributes -- [F], S, M - 1);
-			   sync -> [{Value, induce(Attributes -- [F], Sn, 0)} || {Value, Sn} <- S]
+			   async -> induce_branches(Attributes -- [F], Splitted, M - 1);
+			   sync -> [{Value, induce(Attributes -- [F], Sn, 0)} || {Value, Sn} <- Splitted]
 		       end,
-	    %io:format("Attr: ~p ~n", [Attributes]),
 	    #node{type=compare, value=#compare{type=nominal, 
 					       feature=F, 
 					       branches=Branches}}
