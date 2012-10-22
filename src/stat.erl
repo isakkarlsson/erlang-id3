@@ -6,9 +6,9 @@ log2(V) ->
 
 split_info(Ratios, N) ->
     -1 * lists:sum([(Si/N) * (math:log(Si/N)/math:log(2))
-		    || Si <- [lists:sum([C || {_, C} <- CDist]) ||  {_, CDist} <- Ratios]]).
+		    || Si <- [lists:sum([C || {_, C, _} <- CDist]) ||  {_, CDist} <- Ratios]]).
 gain(Ratios, N) ->
-    lists:sum([lists:sum([C || {_, C} <- CDist])/N * entropy(CDist) || {_,CDist} <- Ratios]).
+    lists:sum([lists:sum([C || {_, C, _} <- CDist])/N * entropy(CDist) || {_, CDist} <- Ratios]).
     
    
 %% Calculate the entropy of V
@@ -30,4 +30,4 @@ entropy(CCount, N) ->
 		    end || C <- CCount]).
 
 count(Dist) ->
-    [X || {_, X} <- Dist].
+    [X || {_, X, _} <- Dist].

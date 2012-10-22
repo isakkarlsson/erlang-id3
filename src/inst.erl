@@ -4,9 +4,9 @@
 test(File) ->
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
-    Data = load(File),
+    {Attr, Data} = load(File),
 
-    io:format("Example: ~p ~n", [lookup(attributes, 2)]),
+    io:format("Example: ~p ~n", [feature_ratio(hd(Attr), Data)]),
     ets:delete(examples),
     ets:delete(attributes),
     Data.
@@ -301,10 +301,10 @@ gain_ratio([AttrId|AttrIds], Examples, Count, Acc) ->
 	       [feature_gain(AttrId, Examples, Count)|Acc]).
 
 feature_gain({categoric, AttrId} = Attr, Examples, Count) ->
-    Ratios = feature_ratio(Attr, Examples),
+    Ratios = split(Attr, Examples),
     G = stat:gain(Ratios, Count),
     Gi = stat:split_info(Ratios, Count),
-    {AttrId, G / (Gi + 0.000000000001)};
+    {G / (Gi + 0.000000000001), AttrId, Ratios};
 feature_gain({numeric, AttrId}, Examples, Count) ->
     {_, Sorted} = lookup(attributes, AttrId),
     {BestSplit, Gain} = evaluate_numeric_split(AttrId, Examples, Count),
@@ -312,33 +312,34 @@ feature_gain({numeric, AttrId}, Examples, Count) ->
 
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
-    [First|ExampleIds] = lists:keysort(1, lists:foldl(fun({Class, _, ExIds}, NewExIds) ->
-						      lists:foldl(fun(ExId, NewExIds1) ->
-									  [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
-								  end, NewExIds, ExIds)
-					      end, [], Examples)),
-    evaluate_number_split(ExampleIds, First, AttrId, Examples, 0, 1, Count),
+    [First|ExampleIds] = 
+	lists:keysort(1, lists:foldl(fun({Class, _, ExIds}, NewExIds) ->
+					     lists:foldl(fun(ExId, NewExIds1) ->
+								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
+							 end, NewExIds, ExIds)
+				     end, [], Examples)),
+    evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count),
     {2, 0.5}.
 
-evaluate_number_split([], _, _, _, Treshold, Gain, _) ->
-    {Treshold, Gain};
-evaluate_number_split([{Value, Class}|Rest], {PrevValue, Class}, AttrId, Examples, Treshold, Gain, Count) ->
+evaluate_number_split([], _, _, AttrId, Split, Threshold, Gain, _) ->
+    {Gain, Threshold, AttrId, Split};
+evaluate_number_split([{Value, Class}|Rest], {PrevValue, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
     case Value == PrevValue of
 	true ->
-	    evaluate_number_split(Rest, {Value, Class}, Examples, AttrId, Treshold, Gain, Count);
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count);
 	false ->
-	    Split = (Value + PrevValue) / 2,
-	    Ratios = feature_ratio({{numeric, AttrId}, Split}, Examples),
+	    Threshold = (Value + PrevValue) / 2,
+	    Ratios = split({{numeric, AttrId}, Threshold}, Examples),
 	    G = stat:gain(Ratios, Count),
 	    Gi = stat:split_info(Ratios, Count),
-	    NewGain0 = (G / (Gi + 0.000000000001)),
-	    {NewTreshold, NewGain} = case Gain <  NewGain0 of
-					 true ->
-					     {Split, NewGain0};
-					 false ->
-					     {Treshold, Gain}
+	    Gain = (G / (Gi + 0.000000000001)),
+	    {NewThreshold, NewGain, NewSplit} = case OldGain <  Gain of
+						    true ->
+							{Threshold, Gain, Ratios};
+						    false ->
+							{OldThreshold, OldGain, OldSplit}
 				     end,
-	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewTreshold, NewGain, Count)
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewSplit, NewThreshold, NewGain, Count)
     end.
 		    
 	    
@@ -364,7 +365,7 @@ test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
     {Types, Examples} = load("../data/iris.txt"),
-    {Time, Split} = timer:tc(?MODULE, split, [{hd(Types), 6}, Examples]),
+    {Time, Split} = timer:tc(?MODULE, split, [{hd(Types), 5}, Examples]),
     io:format("Types: ~p~n", [Types]),
     io:format("Split: ~p~n", [Time]),
 
