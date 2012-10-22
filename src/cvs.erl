@@ -13,7 +13,7 @@ parse(Io, Acc) ->
 	{ok, Line} ->
 	    parse(Io, [parse_line(Line, [])| Acc]);
 	eof ->
-	    Acc;
+	    lists:reverse(Acc);
 	{error, Reason} ->
 	    throw({error, Reason})
     end.
@@ -33,8 +33,29 @@ parse_line([$,|R], Str, Acc) ->
 parse_line([I|R], Str, Acc) ->
     parse_line(R, [I|Str], Acc).
 
-    
-    
+
+to_repr(Str) ->
+    case is_numeric(Str) of
+	{true, Number} ->
+	    Number;
+	false ->
+	    list_to_atom(Str)
+    end.
+
+is_numeric(L) ->
+    Float = (catch erlang:list_to_float(L)),
+    Int = (catch erlang:list_to_integer(L)),
+    case is_number(Float) of
+	true ->
+	    {true, Float};
+	false ->
+	    case is_number(Int) of
+		true ->
+		    {true, Int};
+		false ->
+		    false
+	    end
+    end.
     
 	    
 	   
