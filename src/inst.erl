@@ -307,8 +307,7 @@ feature_gain({categoric, AttrId} = Attr, Examples, Count) ->
     {G / (Gi + 0.000000000001), AttrId, Ratios};
 feature_gain({numeric, AttrId}, Examples, Count) ->
     {_, Sorted} = lookup(attributes, AttrId),
-    {BestSplit, Gain} = evaluate_numeric_split(AttrId, Examples, Count),
-    {AttrId, Gain, BestSplit}.
+    evaluate_numeric_split(AttrId, Examples, Count).
 
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
@@ -318,13 +317,12 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
 								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
 							 end, NewExIds, ExIds)
 				     end, [], Examples)),
-    evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count),
-    {2, 0.5}.
+    evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count).
 
 evaluate_number_split([], _, _, AttrId, Split, Threshold, Gain, _) ->
     {Gain, Threshold, AttrId, Split};
-evaluate_number_split([{Value, Class}|Rest], {PrevValue, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
-    case Value == PrevValue of
+evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
+    case Class == PrevClass of
 	true ->
 	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count);
 	false ->
@@ -365,20 +363,17 @@ test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
     {Types, Examples} = load("../data/iris.txt"),
-    {Time, Split} = timer:tc(?MODULE, split, [{hd(Types), 5}, Examples]),
-    io:format("Types: ~p~n", [Types]),
-    io:format("Split: ~p~n", [Time]),
 
     {Time1, Gains} = timer:tc(?MODULE, gain, 
 			      [sync, Types, Examples,
 			       lists:sum([C || {_, C, _} <- Examples])]),
-    io:format("Gains: ~p ~p ~n", [Time1, Gains]),
+    io:format("Gains: ~p ~p ~n", [Time1, []]),
 
 
     {Time2, Gains0} = timer:tc(?MODULE, gain, 
 			      [async, Types, Examples,
 			       lists:sum([C || {_, C, _} <- Examples])]),
-    io:format("AGain: ~p ~p ~n", [Time2, Gains0]),
+    io:format("AGain: ~p ~p ~n", [Time2, []]),
 
     
 
