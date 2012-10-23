@@ -6,7 +6,7 @@ log2(V) ->
 
 split_info(Ratios, N) ->
     -1 * lists:sum([(Si/N) * (math:log(Si/N)/math:log(2))
-		    || Si <- [lists:sum([C || {_, C, _} <- CDist]) ||  {_, CDist} <- Ratios]]).
+		    || Si <- [lists:sum([C || {_, C, _} <- CDist]) ||  {_, CDist} <- Ratios], Si > 0]).
 gain(Ratios, N) ->
     lists:sum([lists:sum([C || {_, C, _} <- CDist])/N * entropy(CDist) || {_, CDist} <- Ratios]).
     

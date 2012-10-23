@@ -5,11 +5,14 @@ test(File) ->
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
     {Attr, Data} = load(File),
+    
+    Then = now(),
+    Tree = pid3:induce(Attr, Data),
+    io:format("Tree: ~p \n Took: ~p ~n", [Tree, timer:now_diff(erlang:now(), Then)/1000000]),
 
-    io:format("Example: ~p ~n", [split(hd(Attr), Data)]),
     ets:delete(examples),
     ets:delete(attributes),
-    Data.
+    ok.
     
 
 load(File) ->
@@ -17,15 +20,14 @@ load(File) ->
     [Types0|Data0] = Data,
     [Attr0|Examples0] = Data0,
     
-    {ClassIdx, Types} = 
-	case lists:keytake(class, 1, load_types(lists:map(fun (Type) -> 
-								  list_to_atom(Type) 
-							  end, Types0), 1)) of
-	    {value, {_, Idx}, T} ->
-		{Idx, T};
-	    false ->
-		throw({error, no_class})
-	end,
+    Types1 = lists:map(fun (Type) -> 
+			       list_to_atom(Type) 
+		       end, Types0),
+    ClassIdx = pos(Types1, class),
+    Types2 = remove_nth(Types1, ClassIdx),
+    Types = load_types(Types2, 1),
+
+    io:format("Types ~p ~p ~n", [Types, ClassIdx]),
 
     %% TODO: make async
     Examples = load_examples(Examples0, 0, ClassIdx, Types, gb_trees:empty()),
@@ -39,6 +41,15 @@ load(File) ->
 
     Attributes = load_attributes(Attr0, Types, Examples, []),
     {Attributes, Examples}.
+
+pos(List, Ele) ->
+     pos(List, Ele, 1).
+pos([Ele | _], Ele, Pos) ->
+     Pos;
+pos([_ | Tail], Ele, Pos) ->
+     pos(Tail, Ele, Pos+1);
+pos([], _Ele, _) ->
+     0.
 
 load_attributes([], _, _, Acc) ->
     lists:reverse(Acc);
@@ -61,7 +72,7 @@ sort_examples_by(Id, Examples) ->
 take_examples_with(_, []) ->
     [];
 take_examples_with(Id, Examples) ->
-    lists:foldl(fun ({Class, _, ExIds}, List) ->
+    lists:foldl(fun ({_, _, ExIds}, List) ->
 			lists:foldl(fun (ExId, Out) ->
 					    [{element(Id, lookup(examples, ExId)), ExId}|Out]
 				    end, List, ExIds)
@@ -73,8 +84,14 @@ load_examples([], _, _, _, Examples) ->
 		      {C, N, L} % Class, NumerOfOccurences, Ids
 	      end, gb_trees:to_list(Examples));
 load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
+    case length(Inst) < 17 of 
+	true ->
+	    io:format("Line: ~p ~n", [N]); 
+	_ -> ok 
+    end,
     Class = list_to_atom(lists:nth(ClassIdx, Inst)), % NOTE: not optimal
-    Tmp = remove_nth(ClassIdx, Inst),
+    Tmp = remove_nth(Inst, ClassIdx),
+%    io:format("Tmp: ~p ~p ~n", [Class, Tmp]),
     ets:insert(examples, {N, format_attributes(Types, Tmp, N, [])}),
     load_examples(Rest, N + 1, ClassIdx, Types, 
 		      case gb_trees:lookup(Class, Examples) of
@@ -89,8 +106,8 @@ load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
 format_attributes([], [], _, Acc) ->
     list_to_tuple(lists:reverse(Acc));
 format_attributes([{numeric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
-    format_attributes(Types, Attrs, Line, ["?"|Acc]);
+%    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
+    format_attributes(Types, Attrs, Line, [0|Acc]);
 format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
     Number = case is_numeric(A) of
 		 {true, N} ->
@@ -100,10 +117,14 @@ format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
 	     end,
     format_attributes(Types, Attrs, Line, [Number|Acc]);
 format_attributes([{categoric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
+%    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, ['?'|Acc]);
 format_attributes([{categoric,_}|Types], [A|Attrs], Line, Acc) ->
-    format_attributes(Types, Attrs, Line, [list_to_atom(A)|Acc]).
+    format_attributes(Types, Attrs, Line, [list_to_atom(A)|Acc]);
+format_attributes([{_, Id}|_], ["?"|_], Line, _) ->
+    throw({error, invalid_attribute, {Id, Line}}).
+
+
 
 %% Determine if a string is a number,
 %% returns {true, int()|float()} or false
@@ -123,7 +144,7 @@ is_numeric(L) ->
     end.
 
 %% Remove the N:th number
-remove_nth(N, List) ->
+remove_nth(List, N) ->
   {L1, [_|L2]} = lists:split(N-1, List),
   L1 ++ L2.
 
@@ -172,8 +193,8 @@ majority(Examples) ->
 			    end, hd(Examples), tl(Examples)),
     C.
 
-min_gain(Attr, Examples, Count) ->
-    Gains = gain(async, Attr, Examples, Count),
+min_gain(Paralell, Attr, Examples, Count) ->
+    Gains = gain(Paralell, Attr, Examples, Count),
     lists:foldl(fun ({Gain, AttrId, Split}, {OldGain, OldAttrId, OldSplit}) ->
 			case erlang:min(Gain, OldGain) of
 			    Gain -> {Gain, AttrId, Split};
@@ -183,7 +204,17 @@ min_gain(Attr, Examples, Count) ->
 			case erlang:min(Gain, OldGain) of
 			    Gain -> {Gain, AttrId, Threshold, Split};
 			    OldGain -> {OldGain, OldAttrId, OldThreshold, OldSplit}
-			end
+			end;
+		    ({Gain, AttrId, Threshold, Split}, {OldGain, OldAttrId, OldSplit}) ->
+			case erlang:min(Gain, OldGain) of
+			    Gain -> {Gain, AttrId, Threshold, Split};
+			    OldGain -> {OldGain, OldAttrId, OldSplit}
+			end;
+		    ({Gain, AttrId, Split}, {OldGain, OldAttrId, Threshold, OldSplit}) ->
+			case erlang:min(Gain, OldGain) of
+			    Gain -> {Gain, AttrId, Split};
+			    OldGain -> {OldGain, OldAttrId, Threshold, OldSplit}
+			end			
 		end, hd(Gains), tl(Gains)).
 				
 			
@@ -289,13 +320,12 @@ gain_ratio([AttrId|AttrIds], Examples, Count, Acc) ->
     gain_ratio(AttrIds, Examples, Count,
 	       [feature_gain(AttrId, Examples, Count)|Acc]).
 
-feature_gain({categoric, AttrId} = Attr, Examples, Count) ->
+feature_gain({categoric, _} = Attr, Examples, Count) ->
     Ratios = split(Attr, Examples),
     G = stat:gain(Ratios, Count),
     Gi = stat:split_info(Ratios, Count),
     {G / (Gi + 0.000000000001), Attr, Ratios};
 feature_gain({numeric, AttrId} = Attr, Examples, Count) ->
-    {_, Sorted} = lookup(attributes, AttrId),
     {Gain, Threshold, Split} = evaluate_numeric_split(AttrId, Examples, Count),
     {Gain, Attr, Threshold, Split}.
 
@@ -309,7 +339,7 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
 				     end, [], Examples)),
     evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count).
 
-evaluate_number_split([], _, AttrId, _, Split, Threshold, Gain, _) ->
+evaluate_number_split([], _, _, _, Split, Threshold, Gain, _) ->
     {Gain, Threshold, Split};
 evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
     case Class == PrevClass of
@@ -338,22 +368,42 @@ evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Exa
 %% Input:
 %%   - I: The instance set
 %% Output
-%%   - {majority, MajorityClass} or dont_stop
-stop_induce([], Examples) ->
+%%   - {majority, MajorityClass} or {dont_stop, N}
+stop_induce(_, [], Examples) ->
     {majority, majority(Examples)};
-stop_induce(_, Examples) ->
+stop_induce(Paralell, Attrs, Examples) ->
     Count = [V || {_, V, _} <- Examples],
     N = lists:sum(Count),
-    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc,_} <- Examples]) of
-	[] -> {dont_stop, N};
+    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc, _} <- Examples]) of
+	[] -> calculate_gain(Paralell, Attrs, Examples, N);
 	[{X,_}|_] -> {majority, X}
     end.
+
+calculate_gain(Paralell, Attrs, Examples, N) ->
+    {Gain, Result} = case min_gain(Paralell, Attrs, Examples, N) of
+			 {G, _, _} = Tuple->
+			     {G, {categoric, Tuple}};
+			 {G, _, _, _} = Tuple ->
+			     {G, {numeric, Tuple}}
+		     end,
+
+    case Gain < 4 of
+	true ->
+	    {induce, Result};
+	false ->
+%	    {_, _} = Result,
+	    {majority, majority(Examples)}
+    end.
+		
 
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
     {Types, Examples} = load("../data/iris.txt"),
     Count = lists:sum([C || {_, C, _} <- Examples]),
+
+    {Time10, Stop} = timer:tc(?MODULE, stop_induce, [Types, Examples]),
+    io:format("STOP: ~p ~p ~n", [Time10, Stop]),
 
     {Time1, Gains} = timer:tc(?MODULE, gain, 
 			      [sync, Types, Examples,
@@ -367,7 +417,7 @@ test() ->
     io:format("AGain: ~p ~p ~n", [Time2, []]),
 
     {Time3, MinGain} = timer:tc(?MODULE, min_gain,
-				[Types, Examples, Count]),
+				[async, Types, Examples, Count]),
     io:format("MinGain: ~p Gain: ~p ~n", [Time3, element(2, MinGain)]),
 
     ets:delete(attributes),

@@ -9,7 +9,7 @@
 -include("nodes.hrl").
 
 -define(INST, inst). % intended to be used for future changes to inst 
--define(MAX_DEPTH, 3). % max branch depth to parallelize
+-define(MAX_DEPTH, 15). % max branch depth to parallelize
 -define(GAIN, async).
 
 %% Induce decision tree from Instances
@@ -21,20 +21,31 @@
 induce(Attributes, Examples) ->
     induce(Attributes, Examples, ?MAX_DEPTH).
 induce(Attributes, Examples, M) ->
-    case ?INST:stop_induce(Attributes, Examples) of
+    Paralell = if M > 0 -> async; true -> sync end,
+    case ?INST:stop_induce(async, Attributes, Examples) of
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
-	{dont_stop, N} ->
-	    Paralell = if M > 0 -> ?GAIN; true -> sync end,
-	    {F, _} = util:min(?INST:gain(Paralell, Attributes, Examples, N)),
-	    Splitted = ?INST:split(F, Examples),
+	{induce, {categoric, {Gain, Attr, Splitted}}} ->
+%	    io:format(standard_error, " *** Continue building tree (attr: ~p, gain: ~p) *** ~n", [Attr, Gain]),
 	    Branches = case Paralell of
-			   async -> induce_branches(Attributes -- [F], Splitted, M - 1);
-			   sync -> [{Value, induce(Attributes -- [F], Sn, 0)} || {Value, Sn} <- Splitted]
+			   async -> induce_branches(Attributes -- [Attr], Splitted, M - 1);
+			   sync -> [{Value, induce(Attributes -- [Attr], Sn, 0)} || {Value, Sn} <- Splitted]
 		       end,
-	    #node{type=compare, value=#compare{type=nominal, 
-					       feature=F, 
+	    #node{type=compare, value=#compare{type=categoric, 
+					       feature=Attr, 
+					       branches=Branches}};
+	{induce, {numeric, {Gain, Attr, Threshold, Splitted}}} ->
+%	    io:format(standard_error, " *** Continue building tree (attr: ~p, gain: ~p) *** ~n", [Attr, Gain]),
+	    Branches = case Paralell of
+			   async -> induce_branches(Attributes, Splitted, M - 1);
+			   sync -> [{Value, induce(Attributes, Sn, 0)} || {Value, Sn} <- Splitted]
+		       end,
+	    #node{type=compare, value=#compare{type=numeric, 
+					       feature={Attr, Threshold}, 
 					       branches=Branches}}
+
+	    
+	    
     end.
 
 %% Induce brances for Split
