@@ -331,33 +331,67 @@ feature_gain({numeric, AttrId} = Attr, Examples, Count) ->
 
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
-    [First|ExampleIds] = 
-	lists:keysort(1, lists:foldl(fun({Class, _, ExIds}, NewExIds) -> % NOTE: make lazy
+    Then = now(),
+    ExampleIds = 
+	lists:keysort(1, lists:foldl(fun({Class, _, ExIds}, NewExIds) -> % NOTE: Make lazy
 					     lists:foldl(fun(ExId, NewExIds1) ->
 								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
 							 end, NewExIds, ExIds)
 				     end, [], Examples)),
-    evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count).
+    io:format("Sorting took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
 
-evaluate_number_split([], _, _, _, Split, Threshold, Gain, _) ->
+    First = hd(ExampleIds),
+    Then1 = now(),
+    Ret = evaluate_number_split(ExampleIds, {0, '$not_a_class'}, AttrId, Examples, [], element(1, First), 10, Count, 
+				[{'<', []}, {'>=', []}]),
+    io:format("Evaluating split points took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
+    Ret.
+
+%%
+%% Needs to be optimized. Check if there are any classes below, (Value + OldValue) / 2, 
+%% if not continue and check the next interval (and update the class distribution)
+%% if current class is the same as the last don't consider this interval, if not,
+%% calcluate (based on the stored class distribution) the gain, and recur util end.
+%%
+evaluate_number_split([], _, _, _, Split, Threshold, Gain, _, _Dist) ->
     {Gain, Threshold, Split};
-evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
+evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count, Dist) ->
+    % NOTE: NOT WORKING:
+    NewDist = case Value < OldThreshold of
+		  true ->
+		      [{Lt, Left}, Right] = Dist,
+		      case lists:keytake(Class, 1, Left) of
+			  {value, {Class, Num, _}, ClassRest} ->
+			      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right];
+			  false ->
+			      [{Lt, [{Class, 1, []}|Left]}, Right]
+		      end;
+		  false ->
+		      [Left, {Gt, Right}] = Dist,
+		      case lists:keytake(Class, 1, Right) of
+			  {value, {Class, Num, _}, ClassRest} ->
+			      [Left, {Gt, [{Class, Num + 1, []}|ClassRest]}];
+			  false ->
+			      [Left, {Gt, [{Class, 1, []}|Right]}]
+		      end
+	      end,
     case Class == PrevClass of
 	true -> % NOTE: we don't need to check this threshold
-	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count);
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count, NewDist);
 	false ->
 	    Threshold = (Value + PrevValue) / 2, % NOTE: Take the middle between two values
-	    Ratios = split({{numeric, AttrId}, Threshold}, Examples),
+	    Ratios = NewDist,
 	    G = stat:gain(Ratios, Count),
 	    Gi = stat:split_info(Ratios, Count),
 	    Gain = (G / (Gi + 0.000000000001)),
-	    {NewThreshold, NewGain, NewSplit} = case OldGain <  Gain of
+	    io:format("Gain: ~p ~n", [NewDist]),
+	    {NewThreshold, NewGain, NewSplit} = case Gain < OldGain of
 						    true ->
 							{Threshold, Gain, Ratios};
 						    false ->
 							{OldThreshold, OldGain, OldSplit}
 						end,
-	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewSplit, NewThreshold, NewGain, Count)
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewSplit, NewThreshold, NewGain, Count, NewDist)
     end.
 		    
 	    
@@ -399,26 +433,29 @@ calculate_gain(Paralell, Attrs, Examples, N) ->
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    {Types, Examples} = load("../data/iris.txt"),
+    {Types, Examples} = load("../data/bank.txt"),
     Count = lists:sum([C || {_, C, _} <- Examples]),
 
-    {Time10, Stop} = timer:tc(?MODULE, stop_induce, [Types, Examples]),
-    io:format("STOP: ~p ~p ~n", [Time10, Stop]),
+    {Time, {A, B, C, D}} = timer:tc(?MODULE, feature_gain, [hd(Types), Examples, Count]),
+    io:format("Split: ~p ~p ~n", [Time, [A, B, C]]),
 
-    {Time1, Gains} = timer:tc(?MODULE, gain, 
-			      [sync, Types, Examples,
-			       lists:sum([C || {_, C, _} <- Examples])]),
-    io:format("Gains: ~p ~p ~n", [Time1, []]),
+    %% {Time10, Stop} = timer:tc(?MODULE, stop_induce, [async, Types, Examples]),
+    %% io:format("STOP: ~p ~p ~n", [Time10, Stop]),
+
+    %% {Time1, Gains} = timer:tc(?MODULE, gain, 
+    %% 			      [sync, Types, Examples,
+    %% 			       lists:sum([C || {_, C, _} <- Examples])]),
+    %% io:format("Gains: ~p ~p ~n", [Time1, []]),
 
 
-    {Time2, Gains0} = timer:tc(?MODULE, gain, 
-			      [async, Types, Examples,
-			       Count]),
-    io:format("AGain: ~p ~p ~n", [Time2, []]),
+    %% {Time2, Gains0} = timer:tc(?MODULE, gain, 
+    %% 			      [async, Types, Examples,
+    %% 			       Count]),
+    %% io:format("AGain: ~p ~p ~n", [Time2, []]),
 
-    {Time3, MinGain} = timer:tc(?MODULE, min_gain,
-				[async, Types, Examples, Count]),
-    io:format("MinGain: ~p Gain: ~p ~n", [Time3, element(2, MinGain)]),
+    %% {Time3, MinGain} = timer:tc(?MODULE, min_gain,
+    %% 				[async, Types, Examples, Count]),
+    %% io:format("MinGain: ~p Gain: ~p ~n", [Time3, element(2, MinGain)]),
 
     ets:delete(attributes),
     ets:delete(examples).
