@@ -88,6 +88,9 @@ load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
 %% and return a atom or number depending on Type
 format_attributes([], [], _, Acc) ->
     list_to_tuple(lists:reverse(Acc));
+format_attributes([{numeric, Id}|Types], ["?"|Attrs], Line, Acc) ->
+    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
+    format_attributes(Types, Attrs, Line, ["?"|Acc]);
 format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
     Number = case is_numeric(A) of
 		 {true, N} ->
@@ -96,8 +99,8 @@ format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
 		     list_to_atom(A)
 	     end,
     format_attributes(Types, Attrs, Line, [Number|Acc]);
-format_attributes([_|Types], ["?"|Attrs], Line, Acc) ->
-    io:format(standard_error, " *** Warning: Missing value (Line: ~p) *** ", [Line]),
+format_attributes([{categoric, Id}|Types], ["?"|Attrs], Line, Acc) ->
+    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, ['?'|Acc]);
 format_attributes([{categoric,_}|Types], [A|Attrs], Line, Acc) ->
     format_attributes(Types, Attrs, Line, [list_to_atom(A)|Acc]).
@@ -168,6 +171,21 @@ majority(Examples) ->
 				    end
 			    end, hd(Examples), tl(Examples)),
     C.
+
+min_gain(Attr, Examples, Count) ->
+    Gains = gain(async, Attr, Examples, Count),
+    lists:foldl(fun ({Gain, AttrId, Split}, {OldGain, OldAttrId, OldSplit}) ->
+			case erlang:min(Gain, OldGain) of
+			    Gain -> {Gain, AttrId, Split};
+			    OldGain -> {OldGain, OldAttrId, OldSplit}
+			end;
+		    ({Gain, AttrId, Threshold, Split}, {OldGain, OldAttrId, OldThreshold, OldSplit}) ->
+			case erlang:min(Gain, OldGain) of
+			    Gain -> {Gain, AttrId, Threshold, Split};
+			    OldGain -> {OldGain, OldAttrId, OldThreshold, OldSplit}
+			end
+		end, hd(Gains), tl(Gains)).
+				
 			
 %% Split examples w.r.t Attr {categoric, AttrId} or {{nmeric, AttrId},
 %% Threshold}
@@ -275,10 +293,11 @@ feature_gain({categoric, AttrId} = Attr, Examples, Count) ->
     Ratios = split(Attr, Examples),
     G = stat:gain(Ratios, Count),
     Gi = stat:split_info(Ratios, Count),
-    {G / (Gi + 0.000000000001), AttrId, Ratios};
-feature_gain({numeric, AttrId}, Examples, Count) ->
+    {G / (Gi + 0.000000000001), Attr, Ratios};
+feature_gain({numeric, AttrId} = Attr, Examples, Count) ->
     {_, Sorted} = lookup(attributes, AttrId),
-    evaluate_numeric_split(AttrId, Examples, Count).
+    {Gain, Threshold, Split} = evaluate_numeric_split(AttrId, Examples, Count),
+    {Gain, Attr, Threshold, Split}.
 
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
@@ -290,8 +309,8 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
 				     end, [], Examples)),
     evaluate_number_split(ExampleIds, First, AttrId, Examples, [], 0, 1, Count).
 
-evaluate_number_split([], _, _, AttrId, Split, Threshold, Gain, _) ->
-    {Gain, AttrId, Threshold, Split};
+evaluate_number_split([], _, AttrId, _, Split, Threshold, Gain, _) ->
+    {Gain, Threshold, Split};
 evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count) ->
     case Class == PrevClass of
 	true -> % NOTE: we don't need to check this threshold
@@ -334,6 +353,7 @@ test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
     {Types, Examples} = load("../data/iris.txt"),
+    Count = lists:sum([C || {_, C, _} <- Examples]),
 
     {Time1, Gains} = timer:tc(?MODULE, gain, 
 			      [sync, Types, Examples,
@@ -343,12 +363,12 @@ test() ->
 
     {Time2, Gains0} = timer:tc(?MODULE, gain, 
 			      [async, Types, Examples,
-			       lists:sum([C || {_, C, _} <- Examples])]),
+			       Count]),
     io:format("AGain: ~p ~p ~n", [Time2, []]),
 
-    
-
-
+    {Time3, MinGain} = timer:tc(?MODULE, min_gain,
+				[Types, Examples, Count]),
+    io:format("MinGain: ~p Gain: ~p ~n", [Time3, element(2, MinGain)]),
 
     ets:delete(attributes),
     ets:delete(examples).
@@ -356,6 +376,7 @@ test() ->
 
 
 %%
-%% attributes = [{AttrId, Name, SortedListOfEx={Value, ExId}}, ...]
-%% 
-%%
+%% attributes = [{AttrId, Name, []}, ...]
+%% examples = [{ExId, {AttrId1, ..., AttrIdn}}, ....]
+
+
