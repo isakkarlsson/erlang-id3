@@ -84,11 +84,6 @@ load_examples([], _, _, _, Examples) ->
 		      {C, N, L} % Class, NumerOfOccurences, Ids
 	      end, gb_trees:to_list(Examples));
 load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
-    case length(Inst) < 17 of 
-	true ->
-	    io:format("Line: ~p ~n", [N]); 
-	_ -> ok 
-    end,
     Class = list_to_atom(lists:nth(ClassIdx, Inst)), % NOTE: not optimal
     Tmp = remove_nth(Inst, ClassIdx),
 %    io:format("Tmp: ~p ~p ~n", [Class, Tmp]),
@@ -182,6 +177,8 @@ occurences(class, Examples) ->
 	      end, Examples).
 
 %% Determine the majority class in Examples
+majority([]) ->
+    unknown;
 majority(Examples) ->
     {C, _, _} = lists:foldl(fun ({C, N, _}, {C1, N1, _}) ->
 				    case erlang:max(N, N1) of
@@ -331,67 +328,71 @@ feature_gain({numeric, AttrId} = Attr, Examples, Count) ->
 
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
-    Then = now(),
     ExampleIds = 
 	lists:keysort(1, lists:foldl(fun({Class, _, ExIds}, NewExIds) -> % NOTE: Make lazy
 					     lists:foldl(fun(ExId, NewExIds1) ->
 								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
 							 end, NewExIds, ExIds)
 				     end, [], Examples)),
-    io:format("Sorting took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
+    case ExampleIds of
+	[] -> {1000000000, '?', []};
+	_ ->
+	    {_, FirstClass} = First = hd(ExampleIds),
+	    InitGt = lists:map(fun({Class, Num, _}) ->
+				       {Class, Num, []}
+			       end, Examples),
+	    InitLt = lists:map(fun({Class, _, _}) ->
+				       {Class, 0, []}
+			       end, Examples),
+	    evaluate_number_split(ExampleIds, {0, '$not_a_class'}, AttrId, Examples, element(1, First)/2, 1000000000, Count, 
+				  [{'<', InitLt}, {'>=', InitGt}])
+    end.
 
-    First = hd(ExampleIds),
-    Then1 = now(),
-    Ret = evaluate_number_split(ExampleIds, {0, '$not_a_class'}, AttrId, Examples, [], element(1, First), 10, Count, 
-				[{'<', []}, {'>=', []}]),
-    io:format("Evaluating split points took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
-    Ret.
-
-%%
-%% Needs to be optimized. Check if there are any classes below, (Value + OldValue) / 2, 
-%% if not continue and check the next interval (and update the class distribution)
-%% if current class is the same as the last don't consider this interval, if not,
-%% calcluate (based on the stored class distribution) the gain, and recur util end.
-%%
-evaluate_number_split([], _, _, _, Split, Threshold, Gain, _, _Dist) ->
-    {Gain, Threshold, Split};
-evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count, Dist) ->
-    % NOTE: NOT WORKING:
-    NewDist = case Value < OldThreshold of
+evaluate_number_split([], _, AttrId, Examples, Threshold, Gain, _, _Dist) ->
+    {Gain, Threshold, split({{numeric, AttrId}, Threshold}, Examples)};
+evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, 
+		      Examples, OldThreshold, OldGain, Count, Dist) ->
+    NewDist = case Value >= OldThreshold of  %% NOTE: Redistribute the classes
+		  false ->
+		      [{Lt, Left}, Right] = Dist,
+		      Dist0 = case lists:keytake(Class, 1, Left) of
+				  {value, {Class, Num, _}, ClassRest} ->
+				      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
+			      end,
+		      [Left0, {Gt0, Right0}] = Dist0,
+		      case lists:keytake(Class, 1, Right0) of
+			  {value, {Class, Num0, _}, ClassRest0} ->
+			      [Left0, {Gt0, [{Class, Num0 - 1, []}|ClassRest0]}]
+		      end;
 		  true ->
 		      [{Lt, Left}, Right] = Dist,
-		      case lists:keytake(Class, 1, Left) of
-			  {value, {Class, Num, _}, ClassRest} ->
-			      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right];
-			  false ->
-			      [{Lt, [{Class, 1, []}|Left]}, Right]
-		      end;
-		  false ->
-		      [Left, {Gt, Right}] = Dist,
-		      case lists:keytake(Class, 1, Right) of
-			  {value, {Class, Num, _}, ClassRest} ->
-			      [Left, {Gt, [{Class, Num + 1, []}|ClassRest]}];
-			  false ->
-			      [Left, {Gt, [{Class, 1, []}|Right]}]
+		      Dist0 = case lists:keytake(Class, 1, Left) of
+				  {value, {Class, Num, _}, ClassRest} ->
+				      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
+			      end,
+		      [Left0, {Gt0, Right0}] = Dist0,
+		      case lists:keytake(Class, 1, Right0) of
+			  {value, {Class, Num0, _}, ClassRest0} ->
+			      [Left0, {Gt0, [{Class, Num0 - 1, []}|ClassRest0]}]
 		      end
 	      end,
+    %io:format("Dist: ~p < ~p ~n", [Dist, NewDist]),
     case Class == PrevClass of
 	true -> % NOTE: we don't need to check this threshold
-	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldSplit, OldThreshold, OldGain, Count, NewDist);
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldThreshold, OldGain, Count, NewDist);
 	false ->
 	    Threshold = (Value + PrevValue) / 2, % NOTE: Take the middle between two values
 	    Ratios = NewDist,
 	    G = stat:gain(Ratios, Count),
 	    Gi = stat:split_info(Ratios, Count),
 	    Gain = (G / (Gi + 0.000000000001)),
-	    io:format("Gain: ~p ~n", [NewDist]),
-	    {NewThreshold, NewGain, NewSplit} = case Gain < OldGain of
+	    {NewThreshold, NewGain} = case Gain < OldGain of
 						    true ->
-							{Threshold, Gain, Ratios};
+							{Threshold, Gain};
 						    false ->
-							{OldThreshold, OldGain, OldSplit}
+							{OldThreshold, OldGain}
 						end,
-	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewSplit, NewThreshold, NewGain, Count, NewDist)
+	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, NewThreshold, NewGain, Count, NewDist)
     end.
 		    
 	    
@@ -414,15 +415,16 @@ stop_induce(Paralell, Attrs, Examples) ->
     end.
 
 calculate_gain(Paralell, Attrs, Examples, N) ->
-    {Gain, Result} = case min_gain(Paralell, Attrs, Examples, N) of
-			 {G, _, _} = Tuple->
+    {Gain, Result} = case min_gain(async, Attrs, Examples, N) of
+			 {G, _, _} = Tuple ->
 			     {G, {categoric, Tuple}};
 			 {G, _, _, _} = Tuple ->
 			     {G, {numeric, Tuple}}
 		     end,
 
-    case Gain < 4 of
+    case Gain < 2 of
 	true ->
+	    io:format("Still inducing ~p ~p ~p \n", [Attrs, Gain, element(1, Result)]),
 	    {induce, Result};
 	false ->
 %	    {_, _} = Result,
@@ -433,11 +435,16 @@ calculate_gain(Paralell, Attrs, Examples, N) ->
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    {Types, Examples} = load("../data/bank.txt"),
+    {Types, Examples} = load("../data/iris.txt"),
     Count = lists:sum([C || {_, C, _} <- Examples]),
 
-    {Time, {A, B, C, D}} = timer:tc(?MODULE, feature_gain, [hd(Types), Examples, Count]),
-    io:format("Split: ~p ~p ~n", [Time, [A, B, C]]),
+    {Time, Gains} = timer:tc(?MODULE, gain, [async, Types, Examples, Count]),
+    Gains1 = lists:map(fun ({G, V,_}) ->
+			       {G, V};
+			   ({G, V, _, _}) ->
+			       {G, V}
+		       end, Gains),
+    io:format("Split: ~p ~p ~n", [Time, Gains1]),
 
     %% {Time10, Stop} = timer:tc(?MODULE, stop_induce, [async, Types, Examples]),
     %% io:format("STOP: ~p ~p ~n", [Time10, Stop]),

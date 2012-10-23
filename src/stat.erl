@@ -6,7 +6,7 @@ log2(V) ->
 
 split_info(Ratios, N) ->
     -1 * lists:sum([(Si/N) * (math:log(Si/N)/math:log(2))
-		    || Si <- [lists:sum([C || {_, C, _} <- CDist]) ||  {_, CDist} <- Ratios], Si > 0, Si /= N]).
+		    || Si <- [lists:sum([C || {_, C, _} <- CDist]) ||  {_, CDist} <- Ratios], Si > 0]).
 gain(Ratios, N) ->
     ToSum = [lists:sum([C || {_, C, _} <- CDist])/N * entropy(CDist) || {_, CDist} <- Ratios],
     lists:sum(ToSum).
@@ -25,7 +25,8 @@ entropy(Classes) ->
     entropy(CCount, N).
 
 entropy(CCount, N) ->
-    -1 * lists:sum([if C == 0 -> 0;
+    -1 * lists:sum([if C < 0 -> io:format("CCount: ~p ~n", [CCount]), throw({error});
+		       C == 0 -> 0;
 		       true -> C / N * log2(C / N)
 		    end || C <- CCount]).
 

@@ -21,7 +21,7 @@
 induce(Attributes, Examples) ->
     induce(Attributes, Examples, ?MAX_DEPTH).
 induce(Attributes, Examples, M) ->
-    Paralell = if M > 0 -> async; true -> sync end,
+    Paralell = if M > 0 -> sync; true -> sync end,
     case ?INST:stop_induce(async, Attributes, Examples) of
 	{majority, Class} ->
 	    #node{type=classify, value=#classify{as=Class}};
