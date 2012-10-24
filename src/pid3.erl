@@ -9,7 +9,7 @@
 -include("nodes.hrl").
 
 -define(INST, inst). % intended to be used for future changes to inst 
--define(MAX_DEPTH, 10). % max branch depth to parallelize
+-define(MAX_DEPTH, 5). % max branch depth to parallelize
 -define(GAIN, async).
 
 %% Induce decision tree from Instances
@@ -21,34 +21,46 @@
 induce(Attributes, Examples) ->
     induce(Attributes, Examples, ?MAX_DEPTH).
 induce(Attributes, Examples, M) ->
-    Paralell = if M > 0 -> async; true -> sync end,
+    Paralell = if M > 0 -> ?GAIN; true -> sync end,
     case ?INST:stop_induce(Paralell, Attributes, Examples) of
-	{majority, Class} ->
+	{majority, Class} -> % NOTE: Examples are pure (of one class only)
 	    #node{type=classify, value=#classify{as=Class}};
 	{induce, {numeric, {_, _, _, [{_, Split}]}}} ->
 	    #node{type=classify, value=#classify{as=inst:majority(Split)}};
 	{induce, {categoric, {_, _, [{_, Split}]}}} ->
 	    #node{type=classify, value=#classify{as=inst:majority(Split)}};
 	{induce, {categoric, {Gain, Attr, Splitted}}} ->
-%	    io:format(standard_error, " *** Continue building tree (attr: ~p, gain: ~p) *** ~n", [Attr, Gain]),
 	    Branches = case Paralell of
-			   async -> induce_branches(Attributes -- [Attr], Splitted, M - 1);
+			   async -> induce_branches(Attributes -- [Attr], Splitted, M - 1); % NOTE: Categoric values are depleted when splitted
 			   sync -> [{Value, induce(Attributes -- [Attr], Sn, 0)} || {Value, Sn} <- Splitted]
 		       end,
 	    #node{type=compare, value=#compare{type=categoric, 
 					       feature=Attr, 
-					       branches=Branches}};
+					       branches=Branches ++ [{'$default_branch', 
+								      #node{type=classify, 
+									    value=#classify{as=majority_split(Splitted)}}}]}}; % NOTE: ? should be majority
 	{induce, {numeric, {Gain, Attr, Threshold, Splitted}}} ->
-%	    io:format(standard_error, " *** Continue building tree (attr: ~p, gain: ~p) *** ~n", [Attr, Gain]),
 	    Branches = case Paralell of
-			   async -> induce_branches(Attributes, Splitted, M - 1);
+			   async -> induce_branches(Attributes, Splitted, M - 1); % NOTE: but numeric are not
 			   sync -> [{Value, induce(Attributes, Sn, 0)} || {Value, Sn} <- Splitted]
 		       end,
 	    #node{type=compare, value=#compare{type=numeric, 
 					       feature={Attr, Threshold}, 
-					       branches=Branches}}
-
+					       branches=Branches}} % NOTE: ? should be majority
+	
     end.
+
+majority_split(S) ->
+    majority_split(S, {'?', 0, []}).
+majority_split([], {Max, _, _}) ->
+    Max;
+majority_split([{_, [{Class, Num, _}|_]}|Rest], {OldClass, OldNum, _}) ->
+    case Num > OldNum of
+	true -> majority_split(Rest, {Class, Num, []});
+	false -> majority_split(Rest, {OldClass, OldNum, []})
+    end.
+
+
 
 %% Induce brances for Split
 %% Input:

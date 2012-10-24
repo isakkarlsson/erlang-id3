@@ -2,6 +2,10 @@
 -compile(export_all).
 
 
+shuffle(List) ->
+    Random_list = [{random:uniform(), X} || X <- List],
+    [X || {_,X} <- lists:sort(Random_list)].
+
 %% Reduce list L of two tuples to a single value determined by  {_, V1}, {_, V2} F(V1, V2)
 %% Input:
 %%   - F: Function taking two values returning one of them

@@ -1,15 +1,46 @@
 -module(inst).
 -compile(export_all).
 
+-include("nodes.hrl").
+
 test(File) ->
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
     {Attr, Data} = load(File),
-    
-    Then = now(),
-    Tree = pid3:induce(Attr, Data),
-    io:format("Tree: ~p \n Took: ~p ~n", [Tree, timer:now_diff(erlang:now(), Then)/1000000]),
 
+
+    TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
+				  {T, Tr} = lists:split(round(Count * 0.1), util:shuffle(Ids)),
+				  [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+			  end, [], Data),
+    Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
+				[{C, N, I}|Acc];
+			    (_, Acc) -> 
+				Acc
+			end, [], TestTrain),
+    Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
+				[{C, N, I}|Acc];
+			    (_, Acc) -> 
+				Acc
+			end, [], TestTrain),
+
+    Then = now(),
+    Tree = pid3:induce(Attr, Train),
+    io:format("Tree: ~p \n Took: ~p ~n", ["THE TREE", timer:now_diff(erlang:now(), Then)/1000000]),
+%    io:format("Data: ~p ~n", [Data]),
+
+    Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
+				lists:foldl(fun(Id, A) ->
+						    Abut = lookup(examples, Id),
+						    Predict = classify(Abut, Tree),
+				%		    io:format("Classify ~p = ~p (~p) ~n", [Actual, Predict, Actual == Predict]),
+						    [Actual == Predict|A]
+					end, Acc, Ids)
+		      end, [], Test),
+    True = [T || T <- Total, T == true],
+    False = [F || F <- Total, F == false],
+    io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))]),
+    
     ets:delete(examples),
     ets:delete(attributes),
     ok.
@@ -415,12 +446,45 @@ calculate_gain(Paralell, Attrs, Examples, N) ->
 			 {G, _, _, _} = Tuple ->
 			     {G, {numeric, Tuple}}
 		     end,
-    case Gain < 2 of
+    case Gain < 3 of % NOTE: some pre-pruning, this is an arbitary threshold
 	true ->
 	    {induce, Result};
 	false ->
 	    {majority, majority(Examples)}
     end.
+
+%%
+%% Classify Instance according to Model
+%% Input:
+%%   - Instance: An instance
+%%   - Model: A model
+%% Output:
+%%   - The class label as predicted by Model
+classify(_, #node{type=classify, value=#classify{as=Class}}) ->
+    Class;
+classify(Attributes, #node{type=compare, value=#compare{type=categoric, 
+							feature={categoric, AttrId}, 
+							branches=B}}) ->
+    Value = element(AttrId, Attributes),
+    classify(Attributes, find_branch(Value, B));
+classify(Attributes,
+	#node{type=compare, value=#compare{type=numeric, 
+					   feature={{numeric, AttrId}, Threshold}, 
+					   branches=B}}) ->
+    Value = element(AttrId, Attributes),
+    if Value < Threshold ->
+	    classify(Attributes, find_branch('<', B));
+       Value >= Threshold ->
+	    classify(Attributes, find_branch('>=', B))
+    end.
+
+find_branch(V, [{'$default_branch', B}]) ->
+    B;
+find_branch(V, [{V,B}|_]) ->
+    B;
+find_branch(V, [{_,_}|Br]) ->
+    find_branch(V, Br).
+
 		
 
 test() ->
