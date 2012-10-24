@@ -27,8 +27,6 @@ load(File) ->
     Types2 = remove_nth(Types1, ClassIdx),
     Types = load_types(Types2, 1),
 
-    io:format("Types ~p ~p ~n", [Types, ClassIdx]),
-
     %% TODO: make async
     Examples = load_examples(Examples0, 0, ClassIdx, Types, gb_trees:empty()),
     
@@ -233,7 +231,15 @@ split_categoric(AttrId, [{Class, _, ExampleIds}|Examples], Acc) ->
     split_categoric(AttrId, Examples, split_class(AttrId, Class, ExampleIds, Acc)).
 
 split_numeric(_, [], Acc) ->
-    Acc;
+    case Acc of
+	[{'<', []}, Right] ->
+	    [Right];
+	[Left, {'>=', []}] ->
+	    [Left];
+	_ ->
+	    Acc
+		
+    end;
 split_numeric(AttrId, [{Class, _, ExampleIds}|Examples], Acc) ->
     split_numeric(AttrId, Examples, split_class(AttrId, Class, ExampleIds, Acc)).
 
@@ -352,31 +358,18 @@ evaluate_number_split([], _, AttrId, Examples, Threshold, Gain, _, _Dist) ->
     {Gain, Threshold, split({{numeric, AttrId}, Threshold}, Examples)};
 evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, 
 		      Examples, OldThreshold, OldGain, Count, Dist) ->
-    NewDist = case Value >= OldThreshold of  %% NOTE: Redistribute the classes
-		  false ->
-		      [{Lt, Left}, Right] = Dist,
-		      Dist0 = case lists:keytake(Class, 1, Left) of
-				  {value, {Class, Num, _}, ClassRest} ->
-				      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
-			      end,
-		      [Left0, {Gt0, Right0}] = Dist0,
-		      case lists:keytake(Class, 1, Right0) of
-			  {value, {Class, Num0, _}, ClassRest0} ->
-			      [Left0, {Gt0, [{Class, Num0 - 1, []}|ClassRest0]}]
-		      end;
-		  true ->
-		      [{Lt, Left}, Right] = Dist,
-		      Dist0 = case lists:keytake(Class, 1, Left) of
-				  {value, {Class, Num, _}, ClassRest} ->
-				      [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
-			      end,
-		      [Left0, {Gt0, Right0}] = Dist0,
-		      case lists:keytake(Class, 1, Right0) of
-			  {value, {Class, Num0, _}, ClassRest0} ->
-			      [Left0, {Gt0, [{Class, Num0 - 1, []}|ClassRest0]}]
-		      end
-	      end,
-    %io:format("Dist: ~p < ~p ~n", [Dist, NewDist]),
+
+    [{Lt, Left}, Right] = Dist,
+    Dist0 = case lists:keytake(Class, 1, Left) of
+		{value, {Class, Num, _}, ClassRest} ->
+		    [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
+	    end,
+    [Left0, {Gt0, Right0}] = Dist0,
+    NewDist = case lists:keytake(Class, 1, Right0) of
+	{value, {Class, Num0, _}, ClassRest0} ->
+	    [Left0, {Gt0, [{Class, Num0 - 1, []}|ClassRest0]}]
+    end,
+
     case Class == PrevClass of
 	true -> % NOTE: we don't need to check this threshold
 	    evaluate_number_split(Rest, {Value, Class}, AttrId, Examples, OldThreshold, OldGain, Count, NewDist);
@@ -409,25 +402,23 @@ stop_induce(_, [], Examples) ->
 stop_induce(Paralell, Attrs, Examples) ->
     Count = [V || {_, V, _} <- Examples],
     N = lists:sum(Count),
+
     case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc, _} <- Examples]) of
 	[] -> calculate_gain(Paralell, Attrs, Examples, N);
 	[{X,_}|_] -> {majority, X}
     end.
 
 calculate_gain(Paralell, Attrs, Examples, N) ->
-    {Gain, Result} = case min_gain(async, Attrs, Examples, N) of
+    {Gain, Result} = case min_gain(Paralell, Attrs, Examples, N) of
 			 {G, _, _} = Tuple ->
 			     {G, {categoric, Tuple}};
 			 {G, _, _, _} = Tuple ->
 			     {G, {numeric, Tuple}}
 		     end,
-
     case Gain < 2 of
 	true ->
-	    io:format("Still inducing ~p ~p ~p \n", [Attrs, Gain, element(1, Result)]),
 	    {induce, Result};
 	false ->
-%	    {_, _} = Result,
 	    {majority, majority(Examples)}
     end.
 		
@@ -435,14 +426,14 @@ calculate_gain(Paralell, Attrs, Examples, N) ->
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    {Types, Examples} = load("../data/iris.txt"),
+    {Types, Examples} = load("../data/bank.txt"),
     Count = lists:sum([C || {_, C, _} <- Examples]),
 
     {Time, Gains} = timer:tc(?MODULE, gain, [async, Types, Examples, Count]),
     Gains1 = lists:map(fun ({G, V,_}) ->
 			       {G, V};
-			   ({G, V, _, _}) ->
-			       {G, V}
+			   ({G, V, E, _}) ->
+			       {G, V, E}
 		       end, Gains),
     io:format("Split: ~p ~p ~n", [Time, Gains1]),
 
