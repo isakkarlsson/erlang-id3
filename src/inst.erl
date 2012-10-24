@@ -426,7 +426,7 @@ calculate_gain(Paralell, Attrs, Examples, N) ->
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    {Types, Examples} = load("../data/bank.txt"),
+    {Types, Examples} = load("../data/connect-4.txt"),
     Count = lists:sum([C || {_, C, _} <- Examples]),
 
     {Time, Gains} = timer:tc(?MODULE, gain, [async, Types, Examples, Count]),

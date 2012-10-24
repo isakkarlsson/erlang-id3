@@ -92,9 +92,10 @@ collect_branches(From, Pids, Acc) ->
 run(file, File, N) ->
     Data = ?INST:load(File),
     run(data, Data, N);
-run(data, Data, N) ->
-    {Test, Train} =  lists:split(round(length(Data) * N), Data),
-    {Time, Model} = timer:tc(?MODULE, induce, [Train]),
+run(data, {Attr, Examples}, N) ->
+    {Test, Train} =  lists:split(round(length(Examples) * N), Examples),
+
+    {Time, Model} = timer:tc(?MODULE, induce, [Attr, Train]),
     Result = lists:foldl(fun (Inst, Acc) -> 
 				 [?INST:classify(Inst, Model) == gb_trees:get(class, Inst)|Acc] 
 			 end, [], Test),
