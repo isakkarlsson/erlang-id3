@@ -386,11 +386,11 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
     end.
 
 evaluate_number_split([], _, AttrId, Examples, Threshold, Gain, _, _Dist) ->
-    {Gain, Threshold, split({{numeric, AttrId}, Threshold}, Examples)};
+    {Gain, Threshold, split({{numeric, AttrId}, Threshold}, Examples)}; %% NOTE: we split the data here
 evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId, 
 		      Examples, OldThreshold, OldGain, Count, Dist) ->
 
-    [{Lt, Left}, Right] = Dist,
+    [{Lt, Left}, Right] = Dist, %% NOTE: This updates the class distributions
     Dist0 = case lists:keytake(Class, 1, Left) of
 		{value, {Class, Num, _}, ClassRest} ->
 		    [{Lt, [{Class, Num + 1, []}|ClassRest]}, Right]
