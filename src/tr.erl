@@ -31,8 +31,7 @@ induce(Attributes, Examples, M) ->
 						 #node{type=classify, 
 						       value=#classify{as=majority_split(Splitted)}}}]);
 	{induce, {numeric, {_, Attr, Threshold, Splitted}}} ->
-	    NewAttributes = if 
-				length(Splitted) == 1 -> % NOTE: but numeric are only if the result in one region (e.g. when all values are the same)
+	    NewAttributes = if length(Splitted) == 1 -> % NOTE: but numeric are only if they result in one region (e.g. when all values are the same)
 				    Attributes -- [Attr]; 
 				true -> Attributes
 			    end,
