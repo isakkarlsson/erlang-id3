@@ -3,7 +3,7 @@
 
 -include("nodes.hrl").
 
-test(File) ->
+test(File, NNN, RA) ->
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
     {Attr, Data} = load(File),
@@ -12,7 +12,7 @@ test(File) ->
     lists:foreach(fun(Tests) ->
 
 			  TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
-							  {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+							  {Tr, T} = lists:split(round(Count * RA), util:shuffle(Ids)),
 							  [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
 						  end, [], Data),
 			  Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
@@ -28,7 +28,7 @@ test(File) ->
 			  
 			  Then = now(),
 			  Tree = pid3:induce(Attr, Train),
-			  io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
+			  io:format("TreeNr: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
 			  
 			  Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
 						      lists:foldl(fun(Id, A) ->
@@ -41,20 +41,20 @@ test(File) ->
 			  True = [T || T <- Total, T == true],
 			  False = [F || F <- Total, F == false],
 			  io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))])
-		  end, lists:seq(1, 10)),
+		  end, lists:seq(1, NNN)),
 		     
     ets:delete(examples),
     ets:delete(attributes),
     ok.
     
 
-test_ensamble(File) ->
+test_ensamble(File, TreeCount, RA) ->
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
     {Attr, Data} = load(File),
 
     TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
-				    {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+				    {Tr, T} = lists:split(round(Count * RA), util:shuffle(Ids)),
 				    [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
 			    end, [], Data),
     Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
@@ -72,7 +72,7 @@ test_ensamble(File) ->
     
     Ensamble = lists:map(fun(Tests) ->
 				 TestTrain0 = lists:foldl(fun({C, Count, Ids}, Acc) ->
-								 {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+								 {Tr, T} = lists:split(round(Count * RA), util:shuffle(Ids)),
 								 [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
 							 end, [], Train),
 				 Train0 = lists:foldl(fun ({train, C, N, I}, Acc) ->
@@ -85,7 +85,7 @@ test_ensamble(File) ->
 				 Tree = pid3:induce(Attr, Train0),
 				 io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
 				 Tree
-			 end, lists:seq(1, 100)),
+			 end, lists:seq(1, TreeCount)),
 
     
     Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
