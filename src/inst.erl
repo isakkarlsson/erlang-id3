@@ -8,43 +8,126 @@ test(File) ->
     ets:new(attributes, [named_table, set]),
     {Attr, Data} = load(File),
 
+    
+    lists:foreach(fun(Tests) ->
+
+			  TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
+							  {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+							  [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+						  end, [], Data),
+			  Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
+						      [{C, N, I}|Acc];
+						  (_, Acc) -> 
+						      Acc
+					      end, [], TestTrain),
+			  Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
+						     [{C, N, I}|Acc];
+						 (_, Acc) -> 
+						     Acc
+					     end, [], TestTrain),
+			  
+			  Then = now(),
+			  Tree = pid3:induce(Attr, Train),
+			  io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
+			  
+			  Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
+						      lists:foldl(fun(Id, A) ->
+									  Abut = lookup(examples, Id),
+									  Predict = classify(Abut, Tree),
+						%		    io:format("Classify ~p = ~p (~p) ~n", [Actual, Predict, Actual == Predict]),
+									  [Actual == Predict|A]
+								  end, Acc, Ids)
+					      end, [], Test),
+			  True = [T || T <- Total, T == true],
+			  False = [F || F <- Total, F == false],
+			  io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))])
+		  end, lists:seq(1, 10)),
+		     
+    ets:delete(examples),
+    ets:delete(attributes),
+    ok.
+    
+
+test_ensamble(File) ->
+    ets:new(examples, [named_table, set]),
+    ets:new(attributes, [named_table, set]),
+    {Attr, Data} = load(File),
 
     TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
-				  {T, Tr} = lists:split(round(Count * 0.1), util:shuffle(Ids)),
-				  [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
-			  end, [], Data),
+				    {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+				    [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+			    end, [], Data),
     Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
 				[{C, N, I}|Acc];
 			    (_, Acc) -> 
 				Acc
 			end, [], TestTrain),
+    
     Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
-				[{C, N, I}|Acc];
-			    (_, Acc) -> 
-				Acc
-			end, [], TestTrain),
+			       [{C, N, I}|Acc];
+			   (_, Acc) -> 
+			       Acc
+		       end, [], TestTrain),
+    
+    
+    Ensamble = lists:map(fun(Tests) ->
+				 TestTrain0 = lists:foldl(fun({C, Count, Ids}, Acc) ->
+								 {T, Tr} = lists:split(round(Count * 0.3), util:shuffle(Ids)),
+								 [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+							 end, [], Train),
+				 Train0 = lists:foldl(fun ({train, C, N, I}, Acc) ->
+							      [{C, N, I}|Acc];
+							  (_, Acc) -> 
+							      Acc
+						      end, [], TestTrain0),
 
-    Then = now(),
-    Tree = pid3:induce(Attr, Train),
-    io:format("Tree: ~p \n Took: ~p ~n", ["THE TREE", timer:now_diff(erlang:now(), Then)/1000000]),
-%    io:format("Data: ~p ~n", [Data]),
+				 Then = now(),
+				 Tree = pid3:induce(Attr, Train0),
+				 io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
+				 Tree
+			 end, lists:seq(1, 100)),
 
+    
     Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
 				lists:foldl(fun(Id, A) ->
 						    Abut = lookup(examples, Id),
-						    Predict = classify(Abut, Tree),
-				%		    io:format("Classify ~p = ~p (~p) ~n", [Actual, Predict, Actual == Predict]),
-						    [Actual == Predict|A]
-					end, Acc, Ids)
-		      end, [], Test),
+						    Res = classify_ensamble(Actual, Abut, Ensamble),
+						    [Res|A]
+					    end, Acc, Ids)
+			end, [], Test),
     True = [T || T <- Total, T == true],
     False = [F || F <- Total, F == false],
     io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))]),
-    
+	
     ets:delete(examples),
     ets:delete(attributes),
     ok.
-    
+
+classify_ensamble(Actual, Attr, Trees) ->
+    Predictions = [classify(Attr, Tree) || Tree <- Trees],
+    vote(Actual, Predictions).
+
+vote(Actual, Predictions) ->
+    Max = find_max(gb_trees:to_list(lists:foldl(fun(P, Gb) ->
+							case gb_trees:lookup(P, Gb) of
+							    {value, C} ->
+								gb_trees:enter(P, C + 1, Gb);
+							    none ->
+								gb_trees:enter(P, 1, Gb)
+							end
+						end, gb_trees:empty(), Predictions)), {a, 0}),
+    Max == Actual.
+
+find_max([], {Max, _}) ->
+    Max;
+find_max([{Max, C}|Rest], {OldMax, OldC}) ->
+    case C > OldC of
+	true ->
+	    find_max(Rest, {Max, C});
+	false ->
+	    find_max(Rest, {OldMax, OldC})
+    end.
+	     
 
 load(File) ->
     Data = cvs:parse(file, File),
@@ -371,19 +454,15 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
 								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
 							 end, NewExIds, ExIds)
 				     end, [], Examples)),
-    case ExampleIds of
-	[] -> {1000000000, '?', []};
-	_ ->
-	    {_, FirstClass} = First = hd(ExampleIds),
-	    InitGt = lists:map(fun({Class, Num, _}) ->
-				       {Class, Num, []}
-			       end, Examples),
-	    InitLt = lists:map(fun({Class, _, _}) ->
-				       {Class, 0, []}
-			       end, Examples),
-	    evaluate_number_split(ExampleIds, {0, '$not_a_class'}, AttrId, Examples, element(1, First)/2, 1000000000, Count, 
-				  [{'<', InitLt}, {'>=', InitGt}])
-    end.
+    First = hd(ExampleIds),
+    InitGt = lists:map(fun({Class, Num, _}) ->
+			       {Class, Num, []}
+		       end, Examples),
+    InitLt = lists:map(fun({Class, _, _}) ->
+			       {Class, 0, []}
+		       end, Examples),
+    evaluate_number_split(ExampleIds, {0, '$not_a_class'}, AttrId, Examples, element(1, First)/2, 1000000000, Count, 
+			  [{'<', InitLt}, {'>=', InitGt}]).
 
 evaluate_number_split([], _, AttrId, Examples, Threshold, Gain, _, _Dist) ->
     {Gain, Threshold, split({{numeric, AttrId}, Threshold}, Examples)}; %% NOTE: we split the data here
@@ -433,22 +512,32 @@ stop_induce(_, [], Examples) ->
 stop_induce(Paralell, Attrs, Examples) ->
     Count = [V || {_, V, _} <- Examples],
     N = lists:sum(Count),
-
-    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc, _} <- Examples]) of
-	[] -> calculate_gain(Paralell, Attrs, Examples, N);
-	[{X,_}|_] -> {majority, X}
+    if
+	N > 5 -> 
+	    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc, _} <- Examples]) of
+		[] -> calculate_gain(Paralell, Attrs, Examples, N);
+		[{X,_}|_] -> {majority, X}
+	    end;
+	true -> % NOTE: we stop if there are less than 10 examples left
+	    {majority, majority(Examples)}
     end.
 
 calculate_gain(Paralell, Attrs, Examples, N) ->
-    {Gain, Result} = case min_gain(Paralell, Attrs, Examples, N) of
-			 {G, _, _} = Tuple ->
-			     {G, {categoric, Tuple}};
-			 {G, _, _, _} = Tuple ->
-			     {G, {numeric, Tuple}}
-		     end,
-    case Gain < 3 of % NOTE: some pre-pruning, this is an arbitary threshold
+    {Gain, {_, AttrInfo} = Result} = case min_gain(Paralell, Attrs, Examples, N) of
+					{G, _, _} = Tuple ->
+					    {G, {categoric, Tuple}};
+					{G, _, _, _} = Tuple ->
+					    {G, {numeric, Tuple}}
+				    end,
+    Splits = element(tuple_size(AttrInfo), AttrInfo),
+    InstCount = lists:sum(lists:foldl(fun({_, Cc}, Acc) ->
+			      lists:foldl(fun ({_, N,_}, IAcc) ->
+						  [N|IAcc]
+					  end, Acc, Cc)
+		      end, [], Splits)),
+    case Gain < 10 of % NOTE: This is stupid.
 	true ->
-	    {induce, Result};
+	     {induce, Result};
 	false ->
 	    {majority, majority(Examples)}
     end.
@@ -478,7 +567,7 @@ classify(Attributes,
 	    classify(Attributes, find_branch('>=', B))
     end.
 
-find_branch(V, [{'$default_branch', B}]) ->
+find_branch(_, [{'$default_branch', B}]) ->
     B;
 find_branch(V, [{V,B}|_]) ->
     B;

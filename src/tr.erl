@@ -1,9 +1,8 @@
-%% Asynchronous decision tree inducer based on ID3
+%% Asynchronous decision tree inducer
 %%
-%% Todo:
-%%    - allow for numerical attributes (base on c4.5)
-%%    - etc.
--module(pid3).
+%% Author: Isak Karlsson (isak-kar@dsv.su.se)
+%%
+-module(tr).
 -export([induce/2, induce_branch/5, run/3, test/2, test/3, load/2]).
 
 -include("nodes.hrl").
