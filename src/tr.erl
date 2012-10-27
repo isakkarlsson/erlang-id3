@@ -1,11 +1,21 @@
 %% Asynchronous decision tree inducer
 %%
+%% TODO: 
+%%      * Fix $default_branches - change the classification algorithm
+%%      * Improve handling of missing values (not default to 0 for numeric, or 
+%%        create a separate branch for categoric)
+%%      * ?
+%% 
 %% Author: Isak Karlsson (isak-kar@dsv.su.se)
 %%
 -module(tr).
--export([induce/2, induce_branch/5, run/3, test/2, test/3, load/2]).
+-export([induce/2, induce_branch/5, start/0]).
 
 -include("nodes.hrl").
+
+-define(MAJOR_VERSION, 0).
+-define(MINOR_VERSION, 1).
+-define(REVISION, 1).
 
 -define(INST, inst). % intended to be used for future changes to inst 
 -define(MAX_DEPTH, 5). % max branch depth to parallelize
@@ -26,8 +36,8 @@ induce(Attributes, Examples, M) ->
 	    #node{type=classify, value=#classify{as=Class}};
 	{induce, {categoric, {_, Attr, Splitted}}} ->
 	    Branches = induce_branches(Paralell, Attributes -- [Attr], Splitted, M - 1), % NOTE: Categoric values are depleted when splitted..
-		
-	    categoric_branch(Attr, Branches ++ [{'$default_branch', 
+	    
+	    categoric_branch(Attr, Branches ++ [{'$default_branch', % NOTE: default branches are ugly, how do one solve unseen data otherwise?
 						 #node{type=classify, 
 						       value=#classify{as=majority_split(Splitted)}}}]);
 	{induce, {numeric, {_, Attr, Threshold, Splitted}}} ->
@@ -65,7 +75,6 @@ majority_split([{_, [{Class, Num, _}|_]}|Rest], {OldClass, OldNum, _}) ->
 
 
 
-%% Induce brances for Split
 %% Input:
 %%    - Features: The features left
 %%    - Splits: The Instance set splitted ad Feature
@@ -109,32 +118,36 @@ collect_branches(From, Pids, Acc) ->
 	    collect_branches(From, lists:delete(Pid, Pids), [Node|Acc])    
     end.
 
-run(file, File, N) ->
-    Data = ?INST:load(File),
-    run(data, Data, N);
-run(data, {Attr, Examples}, N) ->
-    {Test, Train} =  lists:split(round(length(Examples) * N), Examples),
+start() ->
+    case init:get_argument(h) of
+	{ok, HArg} ->
+	    show_help(),
+	    halt();
+	_ ->
+	    true
+    end,
+    case init:get_argument(i) of
+	{ok, Files} ->
+	    case Files of
+		[[File]] ->
+		    ExampleFile = File,
+		    true;
+		
+		[[]] ->
+		    stdillegal("i"),
+		    halt()
+	    end;
+	_ ->
+	    true
+    end,
+    halt().
 
-    {Time, Model} = timer:tc(?MODULE, induce, [Attr, Train]),
-    Result = lists:foldl(fun (Inst, Acc) -> 
-				 [?INST:classify(Inst, Model) == gb_trees:get(class, Inst)|Acc] 
-			 end, [], Test),
-    Correct = length(lists:filter(fun (X) -> X end, Result)),
-    Incorrect = length(lists:filter(fun (X) -> X == false end, Result)),
-    {Time, Correct, Incorrect, Correct / (Incorrect + Correct), Result}.
+stdwarn(Out) ->
+    io:format(standard_error, " **** ~s **** ~n", [Out]),
+    io:format(standard_error, "See tr -h for options ~n", []).
 
-test(data, Attributes, Examples) ->
-    {Time, Tree} = timer:tc(?MODULE, induce, [Attributes, Examples]),
-    {Time, Tree}.
+stdillegal(Arg) ->
+    stdwarn(io_lib:format("Error: Missing argument to -~s", [Arg])).
 
-load(file, File) ->
-    ets:new(examples, [named_table, set, {read_concurrency, true}]),
-    ets:new(attributes, [named_table, set, {read_concurrency, true}]),
-    ?INST:load(File).
-
-test(file, File) ->
-    {Attributes, Examples} = load(file, File),
-    {Time, Tree} = timer:tc(?MODULE, induce, [Attributes, Examples]),
-    ets:delete(examples),
-    ets:delete(attributes),
-    {Time, Tree}.
+show_help() ->
+    io:format("Ioooooo").

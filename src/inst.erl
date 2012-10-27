@@ -27,7 +27,7 @@ test(File, NNN, RA) ->
 					     end, [], TestTrain),
 			  
 			  Then = now(),
-			  Tree = pid3:induce(Attr, Train),
+			  Tree = tr:induce(Attr, Train),
 			  io:format("TreeNr: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
 			  
 			  Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
@@ -82,7 +82,7 @@ test_ensamble(File, TreeCount, RA) ->
 						      end, [], TestTrain0),
 
 				 Then = now(),
-				 Tree = pid3:induce(Attr, Train0),
+				 Tree = tr:induce(Attr, Train0),
 				 io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
 				 Tree
 			 end, lists:seq(1, TreeCount)),
@@ -127,7 +127,27 @@ find_max([{Max, C}|Rest], {OldMax, OldC}) ->
 	false ->
 	    find_max(Rest, {OldMax, OldC})
     end.
-	     
+
+%% Split the data set in a test and a train set.
+%% The splitting is done random (and uniformly)
+%% {Test, Train}
+split_ds(Dataset, Ratio) ->	     
+    %% TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
+    %% 				    {Tr, T} = lists:split(round(Count * Ratio), util:shuffle(Ids)),
+    %% 				    [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+    %% 			    end, [], Data),
+    %% Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
+    %% 				[{C, N, I}|Acc];
+    %% 			    (_, Acc) -> 
+    %% 				Acc
+    %% 			end, [], TestTrain),
+    %% Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
+    %% 			       [{C, N, I}|Acc];
+    %% 			   (_, Acc) -> 
+    %% 			       Acc
+    %% 		       end, [], TestTrain),
+    %% {Test, Train}.
+    ok.
 
 load(File) ->
     Data = cvs:parse(file, File),
@@ -169,7 +189,6 @@ load_attributes([A|Attrs], [{categoric, Id}|Types], Examples, Acc) ->
     ets:insert(attributes, {Id, A}),
     load_attributes(Attrs, Types, Examples, [{categoric, Id}|Acc]);
 load_attributes([A|Attrs], [{numeric, Id}|Types], Examples, Acc) ->
-%    Sorted = sort_examples_by(Id, Examples),
     ets:insert(attributes, {Id, A, []}),
     load_attributes(Attrs, Types, Examples, [{numeric, Id}|Acc]);
 load_attributes(Attrs, Types, Examples, Acc) ->
@@ -198,7 +217,6 @@ load_examples([], _, _, _, Examples) ->
 load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
     Class = list_to_atom(lists:nth(ClassIdx, Inst)), % NOTE: not optimal
     Tmp = remove_nth(Inst, ClassIdx),
-%    io:format("Tmp: ~p ~p ~n", [Class, Tmp]),
     ets:insert(examples, {N, format_attributes(Types, Tmp, N, [])}),
     load_examples(Rest, N + 1, ClassIdx, Types, 
 		      case gb_trees:lookup(Class, Examples) of
@@ -213,7 +231,7 @@ load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
 format_attributes([], [], _, Acc) ->
     list_to_tuple(lists:reverse(Acc));
 format_attributes([{numeric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-%    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
+    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, [0|Acc]);
 format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
     Number = case is_numeric(A) of
@@ -224,7 +242,7 @@ format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
 	     end,
     format_attributes(Types, Attrs, Line, [Number|Acc]);
 format_attributes([{categoric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-%    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
+    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, ['?'|Acc]);
 format_attributes([{categoric,_}|Types], [A|Attrs], Line, Acc) ->
     format_attributes(Types, Attrs, Line, [list_to_atom(A)|Acc]);
@@ -351,8 +369,7 @@ split_numeric(_, [], Acc) ->
 	[Left, {'>=', []}] ->
 	    [Left];
 	_ ->
-	    Acc
-		
+	    Acc		
     end;
 split_numeric(AttrId, [{Class, _, ExampleIds}|Examples], Acc) ->
     split_numeric(AttrId, Examples, split_class(AttrId, Class, ExampleIds, Acc)).
@@ -500,8 +517,6 @@ evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId,
 		    
 	    
     
-%% TODO: improve to allow for early stopping, etc.
-%% 
 %% Determine wheter we should stop the induction of the tree
 %% Input:
 %%   - I: The instance set
@@ -523,24 +538,13 @@ stop_induce(Paralell, Attrs, Examples) ->
     end.
 
 calculate_gain(Paralell, Attrs, Examples, N) ->
-    {Gain, {_, AttrInfo} = Result} = case min_gain(Paralell, Attrs, Examples, N) of
+    {_, Result} = case min_gain(Paralell, Attrs, Examples, N) of
 					{G, _, _} = Tuple ->
 					    {G, {categoric, Tuple}};
 					{G, _, _, _} = Tuple ->
 					    {G, {numeric, Tuple}}
 				    end,
-    Splits = element(tuple_size(AttrInfo), AttrInfo),
-    InstCount = lists:sum(lists:foldl(fun({_, Cc}, Acc) ->
-			      lists:foldl(fun ({_, N,_}, IAcc) ->
-						  [N|IAcc]
-					  end, Acc, Cc)
-		      end, [], Splits)),
-    case Gain < 10 of % NOTE: This is stupid.
-	true ->
-	     {induce, Result};
-	false ->
-	    {majority, majority(Examples)}
-    end.
+    {induce, Result}.
 
 %%
 %% Classify Instance according to Model
@@ -575,7 +579,6 @@ find_branch(V, [{_,_}|Br]) ->
     find_branch(V, Br).
 
 		
-
 test() ->
     ets:new(examples, [named_table, set, {read_concurrency, true}]),
     ets:new(attributes, [named_table, set, {read_concurrency, true}]),
@@ -610,11 +613,3 @@ test() ->
 
     ets:delete(attributes),
     ets:delete(examples).
-    
-
-
-%%
-%% attributes = [{AttrId, Name, []}, ...]
-%% examples = [{ExId, {AttrId1, ..., AttrIdn}}, ....]
-
-
