@@ -42,7 +42,6 @@ test(File, NNN, RA) ->
 			  False = [F || F <- Total, F == false],
 			  io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))])
 		  end, lists:seq(1, NNN)),
-		     
     ets:delete(examples),
     ets:delete(attributes),
     ok.
@@ -82,7 +81,7 @@ test_ensamble(File, TreeCount, RA) ->
 						      end, [], TestTrain0),
 
 				 Then = now(),
-				 Tree = tr:induce(Attr, Train0),
+				 Tree = tr:induce(lists:sublist(util:shuffle(Attr), round(stat:log2(length(Attr)) + 1)), Train0),
 				 io:format("Tree: ~p\nTook: ~p ~n", [Tests, timer:now_diff(erlang:now(), Then)/1000000]),
 				 Tree
 			 end, lists:seq(1, TreeCount)),
@@ -150,15 +149,15 @@ split_ds(Dataset, Ratio) ->
     ok.
 
 load(File) ->
-    Data = cvs:parse(file, File),
+    Data = csv:parse(file, File),
     [Types0|Data0] = Data,
     [Attr0|Examples0] = Data0,
     
     Types1 = lists:map(fun (Type) -> 
 			       list_to_atom(Type) 
 		       end, Types0),
-    ClassIdx = pos(Types1, class),
-    Types2 = remove_nth(Types1, ClassIdx),
+    ClassIdx = util:pos(Types1, class),
+    Types2 = util:remove_nth(Types1, ClassIdx),
     Types = load_types(Types2, 1),
 
     %% TODO: make async
@@ -173,15 +172,6 @@ load(File) ->
 
     Attributes = load_attributes(Attr0, Types, Examples, []),
     {Attributes, Examples}.
-
-pos(List, Ele) ->
-     pos(List, Ele, 1).
-pos([Ele | _], Ele, Pos) ->
-     Pos;
-pos([_ | Tail], Ele, Pos) ->
-     pos(Tail, Ele, Pos+1);
-pos([], _Ele, _) ->
-     0.
 
 load_attributes([], _, _, Acc) ->
     lists:reverse(Acc);
@@ -216,7 +206,7 @@ load_examples([], _, _, _, Examples) ->
 	      end, gb_trees:to_list(Examples));
 load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
     Class = list_to_atom(lists:nth(ClassIdx, Inst)), % NOTE: not optimal
-    Tmp = remove_nth(Inst, ClassIdx),
+    Tmp = util:remove_nth(Inst, ClassIdx),
     ets:insert(examples, {N, format_attributes(Types, Tmp, N, [])}),
     load_examples(Rest, N + 1, ClassIdx, Types, 
 		      case gb_trees:lookup(Class, Examples) of
@@ -231,10 +221,10 @@ load_examples([Inst|Rest], N, ClassIdx, Types, Examples) ->
 format_attributes([], [], _, Acc) ->
     list_to_tuple(lists:reverse(Acc));
 format_attributes([{numeric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
+%    io:format(standard_error, " *** Warning: Missing numeric value (Line: ~p, Column: ~p) (Set to: 0) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, [0|Acc]);
 format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
-    Number = case is_numeric(A) of
+    Number = case util:is_numeric(A) of
 		 {true, N} ->
 		     N;
 		 false ->
@@ -242,36 +232,12 @@ format_attributes([{numeric, _}|Types], [A|Attrs], Line, Acc) ->
 	     end,
     format_attributes(Types, Attrs, Line, [Number|Acc]);
 format_attributes([{categoric, Id}|Types], ["?"|Attrs], Line, Acc) ->
-    io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
+ %   io:format(standard_error, " *** Warning: Missing categoric value (Line: ~p, Column: ~p) (Set to: ?) *** ~n", [Line, Id]),
     format_attributes(Types, Attrs, Line, ['?'|Acc]);
 format_attributes([{categoric,_}|Types], [A|Attrs], Line, Acc) ->
     format_attributes(Types, Attrs, Line, [list_to_atom(A)|Acc]);
 format_attributes([{_, Id}|_], ["?"|_], Line, _) ->
     throw({error, invalid_attribute, {Id, Line}}).
-
-
-
-%% Determine if a string is a number,
-%% returns {true, int()|float()} or false
-is_numeric(L) ->
-    Float = (catch erlang:list_to_float(L)),
-    Int = (catch erlang:list_to_integer(L)),
-    case is_number(Float) of
-	true ->
-	    {true, Float};
-	false ->
-	    case is_number(Int) of
-		true ->
-		    {true, Int};
-		false ->
-		    false
-	    end
-    end.
-
-%% Remove the N:th number
-remove_nth(List, N) ->
-  {L1, [_|L2]} = lists:split(N-1, List),
-  L1 ++ L2.
 
 %% Load types numeric, categoric or class
 %% Return: {type(), pos} or throw({error, invalid_type, type()})
@@ -294,7 +260,7 @@ lookup(examples, Id) ->
 lookup(attributes, Id) ->
     case ets:lookup(attributes, Id) of
 	[{Id, Name, Sorted}|_] ->
-	    {Name, Sorted};
+	    {Name, Sorted}; % NOTE: sorted is empty (but might be used)
 	[{Id, Name}|_] ->
 	    Name
     end.
@@ -309,7 +275,7 @@ occurences(class, Examples) ->
 %% Determine the majority class in Examples
 majority([]) ->
     unknown;
-majority(Examples) ->
+majority([_|_] = Examples) -> % NOTE: need atleast one example
     {C, _, _} = lists:foldl(fun ({C, N, _}, {C1, N1, _}) ->
 				    case erlang:max(N, N1) of
 					N ->
@@ -320,6 +286,7 @@ majority(Examples) ->
 			    end, hd(Examples), tl(Examples)),
     C.
 
+%% Minimze the gain for Attributes, given Examples
 min_gain(Paralell, Attr, Examples, Count) ->
     Gains = gain(Paralell, Attr, Examples, Count),
     lists:foldl(fun ({Gain, AttrId, Split}, {OldGain, OldAttrId, OldSplit}) ->
@@ -363,7 +330,7 @@ split_categoric(AttrId, [{Class, _, ExampleIds}|Examples], Acc) ->
     split_categoric(AttrId, Examples, split_class(AttrId, Class, ExampleIds, Acc)).
 
 split_numeric(_, [], Acc) ->
-    case Acc of
+    case Acc of % NOTE: if left (or right) is empty, remove them
 	[{'<', []}, Right] ->
 	    [Right];
 	[Left, {'>=', []}] ->
@@ -420,8 +387,7 @@ async_gain(AttrId, Examples, N) ->
 					    Cores
 				    end, AttrLen),
     Me = self(),
-    [spawn(?MODULE, async_feature_gain, [Me, AttrSplit, Examples, N]) ||
-	AttrSplit <- AttrSplits],
+    [spawn(?MODULE, async_feature_gain, [Me, AttrSplit, Examples, N]) || AttrSplit <- AttrSplits],
     collect_gain(Me, length(AttrSplits), []).
 
 
@@ -444,7 +410,6 @@ gain(async, AttrIds, Examples, Count) ->
 gain(sync, AttrId, Examples, Count) ->
     gain_ratio(AttrId, Examples, Count).
 
-
 gain_ratio(AttrIds, Examples, Count) ->
     gain_ratio(AttrIds, Examples, Count, []).
 
@@ -456,13 +421,10 @@ gain_ratio([AttrId|AttrIds], Examples, Count, Acc) ->
 
 feature_gain({categoric, _} = Attr, Examples, Count) ->
     Ratios = split(Attr, Examples),
-    G = stat:gain(Ratios, Count),
-    Gi = stat:split_info(Ratios, Count),
-    {G / (Gi + 0.000000000001), Attr, Ratios};
+    {stat:gain_ratio(Ratios, Count), Attr, Ratios};
 feature_gain({numeric, AttrId} = Attr, Examples, Count) ->
     {Gain, Threshold, Split} = evaluate_numeric_split(AttrId, Examples, Count),
     {Gain, Attr, Threshold, Split}.
-
 
 evaluate_numeric_split(AttrId, Examples, Count) ->
     ExampleIds = 
@@ -471,8 +433,8 @@ evaluate_numeric_split(AttrId, Examples, Count) ->
 								 [{element(AttrId, lookup(examples, ExId)), Class}|NewExIds1]
 							 end, NewExIds, ExIds)
 				     end, [], Examples)),
-    First = hd(ExampleIds),
-    InitGt = lists:map(fun({Class, Num, _}) ->
+    First = hd(ExampleIds), 
+    InitGt = lists:map(fun({Class, Num, _}) -> % NOTE: init the class counts
 			       {Class, Num, []}
 		       end, Examples),
     InitLt = lists:map(fun({Class, _, _}) ->
@@ -503,9 +465,7 @@ evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId,
 	false ->
 	    Threshold = (Value + PrevValue) / 2, % NOTE: Take the middle between two values
 	    Ratios = NewDist,
-	    G = stat:gain(Ratios, Count),
-	    Gi = stat:split_info(Ratios, Count),
-	    Gain = (G / (Gi + 0.000000000001)),
+	    Gain = stat:gain_ratio(Ratios, Count),
 	    {NewThreshold, NewGain} = case Gain < OldGain of
 						    true ->
 							{Threshold, Gain};
@@ -557,24 +517,56 @@ classify(_, #node{type=classify, value=#classify{as=Class}}) ->
     Class;
 classify(Attributes, #node{type=compare, value=#compare{type=categoric, 
 							feature={categoric, AttrId}, 
+							most_popular=P,
 							branches=B}}) ->
     Value = element(AttrId, Attributes),
-    classify(Attributes, find_branch(Value, B));
+    classify(Attributes, case find_branch(Value, B) of
+			     {value, Found} ->
+				 Found;
+			     none ->
+				 case find_branch(P, B) of
+				     {value, Pop} ->
+					 Pop;
+				     none ->
+					 throw({error})
+				 end
+			 end);
 classify(Attributes,
 	#node{type=compare, value=#compare{type=numeric, 
 					   feature={{numeric, AttrId}, Threshold}, 
+					   most_popular=P,
 					   branches=B}}) ->
     Value = element(AttrId, Attributes),
     if Value < Threshold ->
-	    classify(Attributes, find_branch('<', B));
+	    classify(Attributes, case find_branch('<', B) of
+				     {value, Found} ->
+					 Found;
+				     none ->
+					 case find_branch(P, B) of
+					     {value, Pop} ->
+						 Pop;
+					     none ->
+						 throw({error})
+					 end
+				 end);
        Value >= Threshold ->
-	    classify(Attributes, find_branch('>=', B))
+	    classify(Attributes, case find_branch('>=', B) of
+				     {value, Found} ->
+					 Found;
+				     none ->
+					 case find_branch(P, B) of
+					     {value, Pop} ->
+						 Pop;
+					     none ->
+						 throw({error})
+					 end
+				 end)
     end.
 
-find_branch(_, [{'$default_branch', B}]) ->
-    B;
+find_branch(_, []) ->
+    none;
 find_branch(V, [{V,B}|_]) ->
-    B;
+    {value, B};
 find_branch(V, [{_,_}|Br]) ->
     find_branch(V, Br).
 

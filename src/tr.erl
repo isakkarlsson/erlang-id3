@@ -13,6 +13,7 @@
 
 -include("nodes.hrl").
 
+-define(DATA, "2012-10-27").
 -define(MAJOR_VERSION, 0).
 -define(MINOR_VERSION, 1).
 -define(REVISION, 1).
@@ -37,40 +38,46 @@ induce(Attributes, Examples, M) ->
 	{induce, {categoric, {_, Attr, Splitted}}} ->
 	    Branches = induce_branches(Paralell, Attributes -- [Attr], Splitted, M - 1), % NOTE: Categoric values are depleted when splitted..
 	    
-	    categoric_branch(Attr, Branches ++ [{'$default_branch', % NOTE: default branches are ugly, how do one solve unseen data otherwise?
-						 #node{type=classify, 
-						       value=#classify{as=majority_split(Splitted)}}}]);
+	    categoric_branch(Attr, Branches, most_popular_split(Splitted));
 	{induce, {numeric, {_, Attr, Threshold, Splitted}}} ->
 	    NewAttributes = if length(Splitted) == 1 -> % NOTE: but numeric are only if they result in one region (e.g. when all values are the same)
 				    Attributes -- [Attr]; 
 				true -> Attributes
 			    end,
 	    Branches = induce_branches(Paralell, NewAttributes, Splitted, M - 1),
-	    numeric_branch(Attr, Threshold, Branches  ++ [{'$default_branch', 
-							      #node{type=classify, 
-								    value=#classify{as=majority_split(Splitted)}}}])	
+	    numeric_branch(Attr, Threshold, Branches, most_popular_split(Splitted))
     end.
 
 
-categoric_branch(Attr, Branches) ->
+categoric_branch(Attr, Branches, Popular) ->
      #node{type=compare, value=#compare{type=categoric, 
-					       feature=Attr, 
-					       branches=Branches}}.
-numeric_branch(Attr, Threshold, Branches) ->
+					feature=Attr,
+					most_popular=Popular,
+					branches=Branches}}.
+numeric_branch(Attr, Threshold, Branches, Popular) ->
     #node{type=compare, value=#compare{type=numeric, 
-				       feature={Attr, Threshold}, 
+				       feature={Attr, Threshold},
+				       most_popular=Popular,
 				       branches=Branches}}.
+
+find(Value, []) ->
+    throw({error, cant_find, Value});
+find(Value, [{Value, Branch}|_]) ->
+    Branch;
+find(Value, [{_, _}|Rest]) ->
+    find(Value, Rest).
+
 
 %% Finds the most popular branch, finding the branch that maximizes
 %% the number of occurences
-majority_split(S) ->
-    majority_split(S, {'?', 0, []}).
-majority_split([], {Max, _, _}) ->
+most_popular_split(S) ->
+    most_popular_split(S, {'?', 0}).
+most_popular_split([], {Max, _}) ->
     Max;
-majority_split([{_, [{Class, Num, _}|_]}|Rest], {OldClass, OldNum, _}) ->
+most_popular_split([{Pop, [{_, Num, _}|_]}|Rest], {OldPop, OldNum}) ->
     case Num > OldNum of
-	true -> majority_split(Rest, {Class, Num, []});
-	false -> majority_split(Rest, {OldClass, OldNum, []})
+	true -> most_popular_split(Rest, {Pop, Num});
+	false -> most_popular_split(Rest, {OldPop, OldNum})
     end.
 
 
@@ -120,7 +127,7 @@ collect_branches(From, Pids, Acc) ->
 
 start() ->
     case init:get_argument(h) of
-	{ok, HArg} ->
+	{ok, _} ->
 	    show_help(),
 	    halt();
 	_ ->
@@ -139,6 +146,16 @@ start() ->
 	    end;
 	_ ->
 	    true
+    end,
+    case init:get_argument(v) of
+	{ok, ArgSplit} ->
+	    case ArgSplit of
+		[[Split]] ->
+		    SplitSize = Split;
+		[[]] ->
+		    stdillegal("v"),
+		    halt()
+	    end
     end,
     halt().
 

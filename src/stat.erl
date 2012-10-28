@@ -10,7 +10,11 @@ split_info(Ratios, N) ->
 gain(Ratios, N) ->
     ToSum = [lists:sum([C || {_, C, _} <- CDist])/N * entropy(CDist) || {_, CDist} <- Ratios],
     lists:sum(ToSum).
-    
+
+gain_ratio(Ratios, Count) ->    
+    G = stat:gain(Ratios, Count),
+    Gi = stat:split_info(Ratios, Count),
+    G / (Gi + 0.000000000001).
    
 %% Calculate the entropy of V
 %% Input:

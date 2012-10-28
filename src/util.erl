@@ -2,6 +2,38 @@
 -compile(export_all).
 
 
+pos(List, Ele) ->
+     pos(List, Ele, 1).
+pos([Ele | _], Ele, Pos) ->
+     Pos;
+pos([_ | Tail], Ele, Pos) ->
+     pos(Tail, Ele, Pos+1);
+pos([], _Ele, _) ->
+     0.
+
+%% Determine if a string is a number,
+%% returns {true, int()|float()} or false
+is_numeric(L) ->
+    Float = (catch erlang:list_to_float(L)),
+    Int = (catch erlang:list_to_integer(L)),
+    case is_number(Float) of
+	true ->
+	    {true, Float};
+	false ->
+	    case is_number(Int) of
+		true ->
+		    {true, Int};
+		false ->
+		    false
+	    end
+    end.
+
+%% Remove the N:th number
+remove_nth(List, N) ->
+  {L1, [_|L2]} = lists:split(N-1, List),
+  L1 ++ L2.
+
+
 shuffle(List) ->
     Random_list = [{random:uniform(), X} || X <- List],
     [X || {_,X} <- lists:sort(Random_list)].
