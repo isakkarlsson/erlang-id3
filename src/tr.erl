@@ -60,16 +60,8 @@ numeric_branch(Attr, Threshold, Branches, Popular) ->
 				       most_popular=Popular,
 				       branches=Branches}}.
 
-find(Value, []) ->
-    throw({error, cant_find, Value});
-find(Value, [{Value, Branch}|_]) ->
-    Branch;
-find(Value, [{_, _}|Rest]) ->
-    find(Value, Rest).
-
-
 %% Finds the most popular branch, finding the branch that maximizes
-%% the number of occurences
+%% the number of 
 most_popular_split(S) ->
     most_popular_split(S, {'?', 0}).
 most_popular_split([], {Max, _}) ->
@@ -167,4 +159,4 @@ stdillegal(Arg) ->
     stdwarn(io_lib:format("Error: Missing argument to -~s", [Arg])).
 
 show_help() ->
-    io:format("Ioooooo").
+    io:format(standard_error, "Ioooooo", []).
