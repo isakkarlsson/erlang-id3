@@ -9,7 +9,7 @@
 %% Author: Isak Karlsson (isak-kar@dsv.su.se)
 %%
 -module(tr).
--export([induce/4, induce_branch/5, start/0, run_experiment/3, show_information/0]).
+-export([induce/5, induce_branch/7, start/0, run_experiment/6]).
 
 -include("nodes.hrl").
 
@@ -28,23 +28,20 @@
 %%   - Instances: Dictionary with instances
 %% Output:
 %%   - Decision tree
-induce(_, Attributes, Examples, MaxDepth) ->
-    induce(Attributes, Examples, MaxDepth).
-induce(Attributes, Examples, M) ->
+induce(Attributes, Examples, M, GainAsync, Early) ->
     Paralell = if M > 0 -> ?GAIN; true -> sync end,
-    case ?INST:stop_induce(Paralell, Attributes, Examples) of
+    case ?INST:stop_induce(Paralell, Early, GainAsync, Attributes, Examples) of
 	{majority, Class} -> % NOTE: Examples are pure (of one class only)
 	    #node{type=classify, value=#classify{as=Class}};
 	{induce, {categoric, {_, Attr, Splitted}}} ->
-	    Branches = induce_branches(Paralell, Attributes -- [Attr], Splitted, M - 1), % NOTE: Categoric values are depleted when splitted..
-	    
+	    Branches = induce_branches(Paralell, Attributes -- [Attr], Splitted, M - 1, GainAsync, Early), % NOTE: Categoric values are depleted when splitted..
 	    categoric_branch(Attr, Branches, most_popular_split(Splitted));
 	{induce, {numeric, {_, Attr, Threshold, Splitted}}} ->
 	    NewAttributes = if length(Splitted) == 1 -> % NOTE: but numeric are only if they result in one region (e.g. when all values are the same)
 				    Attributes -- [Attr]; 
 				true -> Attributes
 			    end,
-	    Branches = induce_branches(Paralell, NewAttributes, Splitted, M - 1),
+	    Branches = induce_branches(Paralell, NewAttributes, Splitted, M - 1, GainAsync, Early),
 	    numeric_branch(Attr, Threshold, Branches, most_popular_split(Splitted))
     end.
 
@@ -79,16 +76,16 @@ most_popular_split([{Pop, [{_, Num, _}|_]}|Rest], {OldPop, OldNum}) ->
 %%    - Splits: The Instance set splitted ad Feature
 %% Output:
 %%    - A list of Two tuples {SplittedValue, Branch}
-induce_branches(Paralell, Features, Splits, M) ->
+induce_branches(Paralell, Features, Splits, M, GainAsync, Early) ->
     case Paralell of
 	async ->
 	    Me = self(),
 	    Pids = [spawn_link(?MODULE, induce_branch, 
-			       [Me, Sn, Value, Features, M]) || {Value, Sn} <- Splits, Sn /= []],
+			       [Me, Sn, Value, Features, M, GainAsync, Early]) || {Value, Sn} <- Splits, Sn /= []],
 	    
 	    collect_branches(Me, Pids, []);
 	sync ->
-	    [{Value, induce(Features, Sn, 0)} || {Value, Sn} <- Splits]
+	    [{Value, induce(Features, Sn, 0, GainAsync, Early)} || {Value, Sn} <- Splits]
     end.
 
 %% Induce a brance using Instances
@@ -99,8 +96,8 @@ induce_branches(Paralell, Features, Splits, M) ->
 %%    - Features: the features to split
 %% Output:
 %%    From ! {From, self(), {Value, NewBranch}}
-induce_branch(From, Examples, Value, Attributes, M) ->
-    From ! {From, self(), {Value, induce(Attributes, Examples, M)}}.
+induce_branch(From, Examples, Value, Attributes, M, GainAsync, Early) ->
+    From ! {From, self(), {Value, induce(Attributes, Examples, M, GainAsync, Early)}}.
 
 %% Collect branches induced by Pids
 %% Input:
@@ -162,11 +159,52 @@ start() ->
 	_ -> 
 	    ?MAX_DEPTH
     end,
-    run_experiment(ExamplesFile, SplitSize, DepthSize),
+    GainAsync = case init:get_argument(ag) of
+	{ok, ArgGainAsync} ->
+	    case ArgGainAsync of
+		[[]] ->
+		    true;
+		[_] ->
+		    stdillegal("ag"),
+		    halt()
+	    end;
+	_ -> 
+	    false
+    end,
+    Early = case init:get_argument(p) of
+	{ok, ArgStop} ->
+	    case ArgStop of
+		[[Stop]] ->
+		    list_to_integer(Stop);
+		[_] ->
+		    stdillegal("p"),
+		    halt()
+	    end;
+	_ -> 
+	    ?MAX_DEPTH
+    end,
+    Output = case init:get_argument(o) of
+	{ok, ArgOutput} ->
+	    case ArgOutput of
+		[[]] ->
+		    true;
+		[_] ->
+		    stdillegal("o"),
+		    halt()
+	    end;
+	_ -> 
+	    false
+    end,
+    run_experiment(ExamplesFile, SplitSize, DepthSize, GainAsync, Early, Output),
     halt().
 
-run_experiment(ExamplesFile, SplitRatio, Depth) ->
-    io:format("Running: \n * File: ~p \n * Split: ~p \n * Depth: ~p\n", [ExamplesFile, SplitRatio, Depth]),
+run_experiment(ExamplesFile, SplitRatio, Depth, GainAsync, Early, Output) ->
+    io:format(standard_error, "Running:
+ * File: ~p
+ * Split: ~p
+ * Depth: ~p
+ * Prune: ~p
+ * Gain async: ~p\n", [ExamplesFile, SplitRatio, Depth, Early, GainAsync]),
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
 
@@ -174,8 +212,12 @@ run_experiment(ExamplesFile, SplitRatio, Depth) ->
     {Test, Train} = ?INST:split_ds(Examples, SplitRatio),
     
     Then = now(),
-    Tree = induce(async, Attr, Train, Depth),
-    io:format("Took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
+    Tree = induce(Attr, Train, Depth, GainAsync, Early),
+    io:format(standard_error, "Took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
+    if Output == true ->
+	    io:format("~p\n", [Tree]);
+       true -> ok
+    end,
     
     Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
 				lists:foldl(fun(Id, A) ->
@@ -186,7 +228,7 @@ run_experiment(ExamplesFile, SplitRatio, Depth) ->
 			end, [], Test),
     True = [T || T <- Total, T == true],
     False = [F || F <- Total, F == false],
-    io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))]),
+    io:format(standard_error, "Accuracy: ~p ~n", [length(True)/(length(True)+length(False))]),
     ets:delete(examples),
     ets:delete(attributes),
     ok.
@@ -206,13 +248,22 @@ show_help() ->
 Example: tr -i <EXAMPLES> -y 0.66 -d 5 
          tr -i <EXAMPLES> -y 1 -d 0 
 
--y [Percent training data] 
+-y  [Percent training data] 
      A percentage of data that is used for
      training the model. The rest is used for validation.
      Default: 0.66
--d [Maximum depth to paralellize]
+-d  [Maximum depth to paralellize]
      The depth in which the model is induced in paralell.
      Default: 5
+-ag []
+     Calculate gain in parallel even thought the MAX_DEPTH
+     is reached (-d).
+-o  []
+     Output the tree model
+-p  [N instances required to partition]
+     Stop inducing a branch (and take the majority) when
+     N is reached (for a given branch)
+     Default: 10
 "]).
 
 show_information() ->

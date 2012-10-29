@@ -481,15 +481,15 @@ evaluate_number_split([{Value, Class}|Rest], {PrevValue, PrevClass}, AttrId,
 %%   - I: The instance set
 %% Output
 %%   - {majority, MajorityClass} or {dont_stop, N}
-stop_induce(_, [], Examples) ->
+stop_induce(_, _, _, [], Examples) ->
     {majority, majority(Examples)};
-stop_induce(Paralell, Attrs, Examples) ->
+stop_induce(Paralell, EarlyStop, GainAsync, Attrs, Examples) ->
     Count = [V || {_, V, _} <- Examples],
     N = lists:sum(Count),
     if
-	N > 5 -> 
+	N > EarlyStop -> 
 	    case lists:filter(fun ({_, C}) -> C / N == 1 end, [{Cl, Nc} || {Cl, Nc, _} <- Examples]) of
-		[] -> calculate_gain(Paralell, Attrs, Examples, N);
+		[] -> calculate_gain(if GainAsync == true -> Paralell; true -> async end, Attrs, Examples, N);
 		[{X,_}|_] -> {majority, X}
 	    end;
 	true -> % NOTE: we stop if there are less than 10 examples left
