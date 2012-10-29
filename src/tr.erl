@@ -9,7 +9,7 @@
 %% Author: Isak Karlsson (isak-kar@dsv.su.se)
 %%
 -module(tr).
--export([induce/2, induce_branch/5, start/0]).
+-export([induce/4, induce_branch/5, start/0, run_experiment/3]).
 
 -include("nodes.hrl").
 
@@ -28,8 +28,8 @@
 %%   - Instances: Dictionary with instances
 %% Output:
 %%   - Decision tree
-induce(Attributes, Examples) ->
-    induce(Attributes, Examples, ?MAX_DEPTH).
+induce(_, Attributes, Examples, MaxDepth) ->
+    induce(Attributes, Examples, MaxDepth).
 induce(Attributes, Examples, M) ->
     Paralell = if M > 0 -> ?GAIN; true -> sync end,
     case ?INST:stop_induce(Paralell, Attributes, Examples) of
@@ -125,31 +125,72 @@ start() ->
 	_ ->
 	    true
     end,
-    case init:get_argument(i) of
+    ExamplesFile = case init:get_argument(i) of
 	{ok, Files} ->
 	    case Files of
 		[[File]] ->
-		    ExampleFile = File,
-		    true;
-		
-		[[]] ->
+		    File;
+		[_] ->
 		    stdillegal("i"),
 		    halt()
 	    end;
 	_ ->
-	    true
+	    stdwarn("Traning examples are required"),
+	    halt()
     end,
-    case init:get_argument(v) of
-	{ok, ArgSplit} ->
-	    case ArgSplit of
-		[[Split]] ->
-		    SplitSize = Split;
-		[[]] ->
-		    stdillegal("v"),
+    SplitSize = case init:get_argument(y) of
+		    {ok, ArgSplit} ->
+			case ArgSplit of
+			    [[Split]] ->
+				list_to_float(Split);
+			    [_] ->
+				stdillegal("y"),
+				halt()
+			end;
+		    _ -> 
+			0.66
+    end,
+    DepthSize = case init:get_argument(d) of
+	{ok, ArgDepth} ->
+	    case ArgDepth of
+		[[Depth]] ->
+		    list_to_integer(Depth);
+		[_] ->
+		    stdillegal("d"),
 		    halt()
-	    end
+	    end;
+	_ -> 
+	    ?MAX_DEPTH
     end,
+    run_experiment(ExamplesFile, SplitSize, DepthSize),
     halt().
+
+run_experiment(ExamplesFile, SplitRatio, Depth) ->
+    io:format("Running: \n * File: ~p \n * Split: ~p \n * Depth: ~p\n", [ExamplesFile, SplitRatio, Depth]),
+    ets:new(examples, [named_table, set]),
+    ets:new(attributes, [named_table, set]),
+
+    {Attr, Examples} = ?INST:load(ExamplesFile),
+    {Test, Train} = ?INST:split_ds(Examples, SplitRatio),
+    
+    Then = now(),
+    Tree = induce(async, Attr, Train, Depth),
+    io:format("Took: ~p ~n", [timer:now_diff(erlang:now(), Then)/1000000]),
+    
+    Total = lists:foldl(fun({Actual, _, Ids}, Acc) ->
+				lists:foldl(fun(Id, A) ->
+						    Abut = ?INST:lookup(examples, Id),
+						    Predict = ?INST:classify(Abut, Tree),
+						    [Actual == Predict|A]
+					    end, Acc, Ids)
+			end, [], Test),
+    True = [T || T <- Total, T == true],
+    False = [F || F <- Total, F == false],
+    io:format("Accuracy: ~p ~n", [length(True)/(length(True)+length(False))]),
+    ets:delete(examples),
+    ets:delete(attributes),
+    ok.
+    
 
 stdwarn(Out) ->
     io:format(standard_error, " **** ~s **** ~n", [Out]),

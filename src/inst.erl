@@ -130,23 +130,22 @@ find_max([{Max, C}|Rest], {OldMax, OldC}) ->
 %% Split the data set in a test and a train set.
 %% The splitting is done random (and uniformly)
 %% {Test, Train}
-split_ds(Dataset, Ratio) ->	     
-    %% TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
-    %% 				    {Tr, T} = lists:split(round(Count * Ratio), util:shuffle(Ids)),
-    %% 				    [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
-    %% 			    end, [], Data),
-    %% Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
-    %% 				[{C, N, I}|Acc];
-    %% 			    (_, Acc) -> 
-    %% 				Acc
-    %% 			end, [], TestTrain),
-    %% Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
-    %% 			       [{C, N, I}|Acc];
-    %% 			   (_, Acc) -> 
-    %% 			       Acc
-    %% 		       end, [], TestTrain),
-    %% {Test, Train}.
-    ok.
+split_ds(Data, Ratio) ->	     
+    TestTrain = lists:foldl(fun({C, Count, Ids}, Acc) ->
+     				    {Tr, T} = lists:split(round(Count * Ratio), util:shuffle(Ids)),
+     				    [{train, C, length(Tr), Tr}, {test, C, length(T), T}|Acc]
+     			    end, [], Data),
+    Train = lists:foldl(fun ({train, C, N, I}, Acc) ->
+     				[{C, N, I}|Acc];
+     			    (_, Acc) -> 
+     				Acc
+     			end, [], TestTrain),
+    Test = lists:foldl(fun ({test, C, N, I}, Acc) ->
+     			       [{C, N, I}|Acc];
+     			   (_, Acc) -> 
+     			       Acc
+     		       end, [], TestTrain),
+    {Test, Train}.
 
 load(File) ->
     Data = csv:parse(file, File),
