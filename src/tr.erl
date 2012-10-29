@@ -9,11 +9,11 @@
 %% Author: Isak Karlsson (isak-kar@dsv.su.se)
 %%
 -module(tr).
--export([induce/4, induce_branch/5, start/0, run_experiment/3]).
+-export([induce/4, induce_branch/5, start/0, run_experiment/3, show_information/0]).
 
 -include("nodes.hrl").
 
--define(DATA, "2012-10-27").
+-define(DATE, "2012-10-27").
 -define(MAJOR_VERSION, 0).
 -define(MINOR_VERSION, 1).
 -define(REVISION, 1).
@@ -200,4 +200,25 @@ stdillegal(Arg) ->
     stdwarn(io_lib:format("Error: Missing argument to -~s", [Arg])).
 
 show_help() ->
-    io:format(standard_error, "Ioooooo", []).
+    io:format(standard_error, "~s", [show_information() ++
+"
+
+Example: tr -i <EXAMPLES> -y 0.66 -d 5 
+         tr -i <EXAMPLES> -y 1 -d 0 
+
+-y [Percent training data] 
+     A percentage of data that is used for
+     training the model. The rest is used for validation.
+     Default: 0.66
+-d [Maximum depth to paralellize]
+     The depth in which the model is induced in paralell.
+     Default: 5
+"]).
+
+show_information() ->
+    io_lib:format("Decision tree inducer
+Version (of ~s): ~p.~p.~p
+All rights reserved Isak Karlsson 2012+",
+		  [?DATE, ?MAJOR_VERSION, ?MINOR_VERSION, ?REVISION]).
+		  
+    
