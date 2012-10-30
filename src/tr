@@ -1,2 +1,2 @@
 #!/bin/bash
-erl -noshell -s tr start "$1"
+erl -noshell -s tr start "$@"
