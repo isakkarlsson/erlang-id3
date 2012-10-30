@@ -1,0 +1,1 @@
+{"init terminating in do_boot",{undef,[{tr,start,[['./tr']]},{init,start_it,1},{init,start_em,1}]}}
