@@ -199,17 +199,20 @@ start() ->
     halt().
 
 run_experiment(ExamplesFile, SplitRatio, Depth, GainAsync, Early, Output) ->
-    io:format(standard_error, "Running:
- * File: ~p
- * Split: ~p
- * Depth: ~p
- * Prune: ~p
- * Gain async: ~p\n", [ExamplesFile, SplitRatio, Depth, Early, GainAsync]),
     ets:new(examples, [named_table, set]),
     ets:new(attributes, [named_table, set]),
 
     {Attr, Examples} = ?INST:load(ExamplesFile),
     {Test, Train} = ?INST:split_ds(Examples, SplitRatio),
+
+    io:format(standard_error, "Running:
+ * File: ~p
+ * Split: ~p
+ * Attributes: ~p
+ * Examples: ~p (train), ~p (test)\n", [ExamplesFile, SplitRatio, length(Attr), 
+					lists:sum([N || {_, N, _} <- Train]),
+					lists:sum([N || {_, N, _} <- Test])]),
+
     
     Then = now(),
     Tree = induce(Attr, Train, Depth, GainAsync, Early),
